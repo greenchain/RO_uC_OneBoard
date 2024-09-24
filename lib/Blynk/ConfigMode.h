@@ -536,9 +536,10 @@ void enterError() {
       return;
     }
   }
-  DEBUG_PRINT("Restarting after error.");
-  delay(10);
+  DEBUG_PRINT("!!!!!!!!!!!!BLYNK WOULD HAVE RESTARTED!!!!!!!!!!");  // Added by Calvin
+  // DEBUG_PRINT("Restarting after error.");
+  // delay(10);
 
-  restartMCU();
+  // restartMCU();
 }
 

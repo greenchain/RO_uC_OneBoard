@@ -1,6 +1,4 @@
-#include "BlynkRO.h"
 #include "Definitions.h"
-#include <BlynkEdgent.h>
 
 #define MIN_IN_SEC 60
 #define TEN_SEC 10
@@ -11,11 +9,18 @@ Save SET;
 
 Nextion HMI(BAUD_RATE, HMI_RX_PIN, HMI_TX_PIN);
 ADS1115 ADC_1(0x48);
+float AnalogIn[4] = {0};
+bool readComplete = false;
+uint CurrentFactor = DEF_CURRENT_FACTOR;
+uint VoltageFactor = DEF_VOLTAGE_FACTOR;
 
 VolumeMeter PermeateVM(VOLUME_IN);
-PulseMeter PermeatePM(FLOW_PERM, LARGE_FLOW_FACTOR);
-PulseMeter BrinePM(FLOW_BRINE, SMALL_FLOW_FACTOR);     // 12.5
-PulseMeter RecyclePM(FLOW_RECYCLE, LARGE_FLOW_FACTOR); // 120
+
+float LargeFlowFactor = DEF_LARGE_FLOW_FACTOR;
+float SmallFlowFactor = DEF_SMALL_FLOW_FACTOR;
+PulseMeter PermeatePM(FLOW_PERM, &LargeFlowFactor);
+PulseMeter BrinePM(FLOW_BRINE, &LargeFlowFactor);     // 12.5
+PulseMeter RecyclePM(FLOW_RECYCLE, &LargeFlowFactor); // 120
 
 DigitalInput FeedTankFloat(FEED_AVAILABLE);
 DigitalInput ProductTankFloat(PRODUCT_FLOAT);
@@ -51,6 +56,43 @@ Warnings dPressFault(stateStr[ST_D_P_FAULT], MIN_IN_SEC);
 Warnings ExternalFault(stateStr[ST_EXT_FAULT], TEN_SEC);
 Warnings VSD_Fault(stateStr[ST_VSD_FAULT], TEN_SEC);
 
+void RunCoreFunctions(void)
+{
+    ulong thisMs = millis();
+    static ulong TenMillisecTimeStamp = thisMs;
+    static ulong HalfSecTimeStamp = thisMs;
+    static ulong OneSecTimeStamp = thisMs;
+
+    if (thisMs - TenMillisecTimeStamp >= 10) // every 10ms
+    {
+        TenMillisecTimeStamp = thisMs;
+        CheckInputs();
+        CheckFlowMeters();
+    }
+    if (thisMs - HalfSecTimeStamp >= 500) // every 500ms
+    {
+        HalfSecTimeStamp = thisMs;
+        CheckSensors();
+        // debugln(thisMs);
+    }
+    if (thisMs - OneSecTimeStamp >= 1000) // every 500ms
+    {
+        OneSecTimeStamp = thisMs;
+        SM.RunStateMachine();
+        UpdateHMI();
+    }
+    HPP_VSD.RunModbus();
+    BOOST_VSD.RunModbus();
+    if (analog_flag)
+        RunAnalog(ADC_1);     // TODO change this to a method in OB class once ADC class created
+    while (Comms.available()) // listen if there are items on serial
+    {
+        HMI.Listen();
+    }
+    xSemaphoreGive(xSemaphore);
+    vTaskDelay(1 / portTICK_PERIOD_MS);
+}
+
 bool Check4to20(float &value)
 {
     if (value < 4.0F)
@@ -75,149 +117,109 @@ void CheckSensors(void) // TODO
     if (analog_flag)
     {
         // // ANALOGUE 1
-        Temp1 = (float)ADC_1.readADC(0) / CurrentFactor;
+        // Temp1 = (float)ADC_1.readADC(0) / CurrentFactor;
+        Temp1 = AnalogIn[0] / CurrentFactor;
         Check4to20(Temp1);
-        if (SM.EC > SENSOR_MIN_EC)
-            SM.EC = (SM.EC * AVG_LESS1 + map_4to20(Temp1, SENSOR_MIN_EC, SENSOR_MAX_EC)) / AVERAGE_NUM;
-        else
-            SM.EC = map_4to20(Temp1, SENSOR_MIN_EC, SENSOR_MAX_EC);
-        HMI.ConvertToHMI_SensorValue(SM.EC, I_EC_PERM);
+        SM.EC = map_4to20(Temp1, SENSOR_MIN_EC, SENSOR_MAX_EC);
+        HMI.ConvertToHMI_SensorValue(SM.EC, I_EC_PERM, SM.state == ST_SERVICE);
 
         // // ANALOGUE 2
-        Temp2 = (float)ADC_1.readADC(1) / CurrentFactor;
+        Temp2 = AnalogIn[1] / CurrentFactor;
         Check4to20(Temp2);
-        if (SM.FeedPressure > SENSOR_MIN_FP)
-            SM.FeedPressure = (SM.FeedPressure * AVG_LESS1 + map_4to20(Temp2, SENSOR_MIN_FP, SENSOR_MAX_FP)) / AVERAGE_NUM;
-        else
-            SM.FeedPressure = map_4to20(Temp2, SENSOR_MIN_FP, SENSOR_MAX_FP);
-        HMI.ConvertToHMI_SensorValue(SM.FeedPressure, I_FEED_PRESS);
+        SM.FeedPressure = map_4to20(Temp2, SENSOR_MIN_FP, SENSOR_MAX_FP);
+        HMI.ConvertToHMI_SensorValue(SM.FeedPressure, I_FEED_PRESS, SM.state == ST_SERVICE);
 
         // // ANALOGUE 3
-        // Temp3 = (float)ADC_1.readADC(2) / CurrentFactor;
+        // Temp3 = AnalogIn[3] / CurrentFactor;
         // Check4to20(Temp3);
 
         // // ANALOGUE 4
-        // Temp4 = (float)ADC_1.readADC(3) / CurrentFactor;
+        // Temp4 = AnalogIn[4] / CurrentFactor;
         // Check4to20(Temp4);
 
-        // SEND SENSOR DATA TO BLYNK
-        Blynk.virtualWrite(B_EC, SM.EC);
-        Blynk.virtualWrite(B_FEED_PRESS, SM.FeedPressure);
-        // debugln("LVL:  " + String(Temp1, 2) + "mA  " + String((float)SM.ProductTank.Level_p, 1) + "\% - CF:" + String(CurrentFactor0));
-        // debugln("PH: " + String(Temp2, 2) + "mA  " + String((float)SM.PH, 2) + "pH - CF:" + String(CurrentFactor1));
-        // debugln("ORP: " + String(Temp3, 2) + "mA  " + String((float)SM.ORP, 1) + "mV - CF:" + String(CurrentFactor2));
-        // debugln("EC: " + String(Temp4, 2) + "mA  " + String((float)SM.EC, 1) + "uS/cm - CF:" + String(CurrentFactor3));
-        // debugln();
+        if (HMI.currPage == P_CALIBRATE)
+        {
+            HMI.ConvertToHMI_Value(AnalogIn[0] / CurrentFactor, VAL_A0_Current, false);
+            HMI.ConvertToHMI_Value(AnalogIn[0] / VoltageFactor, VAL_A0_Voltage, false);
+            HMI.ConvertToHMI_Value(AnalogIn[1] / CurrentFactor, VAL_A1_Current, false);
+            HMI.ConvertToHMI_Value(AnalogIn[1] / VoltageFactor, VAL_A1_Voltage, false);
+            HMI.ConvertToHMI_Value(AnalogIn[2] / CurrentFactor, VAL_A2_Current, false);
+            HMI.ConvertToHMI_Value(AnalogIn[2] / VoltageFactor, VAL_A2_Voltage, false);
+            HMI.ConvertToHMI_Value(AnalogIn[3] / CurrentFactor, VAL_A3_Current, false);
+            HMI.ConvertToHMI_Value(AnalogIn[3] / VoltageFactor, VAL_A3_Voltage, false);
+        }
+
+        readComplete = false;
     }
 
     // Check Pump values
     float TempVSD1 = 0, TempVSD2 = 0;
-    PumpStatusHandler(HPP_VSD, I_RO_PUMP, PVAL_RO_PUMP, TempVSD1, TempVSD2, B_RO_PUMP);
+    PumpStatusHandler(HPP_VSD, I_RO_PUMP, PVAL_RO_PUMP, TempVSD1, TempVSD2); //, B_RO_PUMP);
     bool OutOf4to20_alarm = !Check4to20(TempVSD1);
-    TempVSD1 = map_4to20(TempVSD1, SENSOR_MIN_HP, SENSOR_MAX_HP); // map to pressure
-    HMI.ConvertToHMI_SensorValue(TempVSD1, I_HP_PRESS, HPP_VSD.Running);
-    if (OutOf4to20_alarm)
-        I_HP_PRESS.alarm = true;
-    Blynk.virtualWrite(B_HP_PRESS, TempVSD1);
-    // debugln("VSD A1: " + String(TempVSD1, 2));
+    SM.HP_Pressure = map_4to20(TempVSD1, SENSOR_MIN_HP, SENSOR_MAX_HP); // map to pressure
+    HMI.ConvertToHMI_SensorValue(SM.HP_Pressure, I_HP_PRESS, HPP_VSD.Running);
+    // if (OutOf4to20_alarm)
+    //     I_HP_PRESS.alarm = true;
 
     OutOf4to20_alarm = !Check4to20(TempVSD2);
-    TempVSD2 = map_4to20(TempVSD2, SENSOR_MIN_HP, SENSOR_MAX_HP);
-    HMI.ConvertToHMI_SensorValue(TempVSD2, I_POST_MEM_PRESS, HPP_VSD.Running);
-    if (OutOf4to20_alarm)
-        I_HP_PRESS.alarm = true;
-    Blynk.virtualWrite(B_POST_MEM_PRESS, TempVSD2);
-    // debugln("VSD A2: " + String(TempVSD2, 2));
+    SM.PostMemPressure = map_4to20(TempVSD2, SENSOR_MIN_HP, SENSOR_MAX_HP);
+    HMI.ConvertToHMI_SensorValue(SM.PostMemPressure, I_POST_MEM_PRESS, HPP_VSD.Running);
+    // if (OutOf4to20_alarm)
+    //     I_HP_PRESS.alarm = true;
 
-    float diffP = TempVSD1 - TempVSD2;
-    HMI.ConvertToHMI_SensorValue(diffP, I_DELTA_PRESS, HPP_VSD.Running);
-    Blynk.virtualWrite(B_DELTA_PRESS, diffP);
-    // debugln("dp: " + String(TempVSD1, 2));
+    SM.DeltaMemPressure = SM.HP_Pressure - SM.PostMemPressure;
+    HMI.ConvertToHMI_SensorValue(SM.DeltaMemPressure, I_DELTA_PRESS, HPP_VSD.Running);
+
+    PumpStatusHandler(BOOST_VSD, I_BOOSTER_PUMP, PVAL_BOOSTER_PUMP, TempVSD1, TempVSD2); //, B_BOOST_PUMP);
+    OutOf4to20_alarm = !Check4to20(TempVSD1);
+    SM.BoostPressure = map_4to20(TempVSD1, SENSOR_MIN_FP, SENSOR_MAX_FP);
+    HMI.ConvertToHMI_SensorValue(SM.BoostPressure, I_BOOSTER_PRESS, false);
+    // if (OutOf4to20_alarm || BOOST_VSD.PumpState == ModbusVSD::PumpDisconnect)
+    //     I_BOOSTER_PRESS.alarm = true;
 
     SET.StoreRO_PumpMins(HPP_VSD.pumpMin);
-    // debugln();
-
-    PumpStatusHandler(BOOST_VSD, I_BOOSTER_PUMP, PVAL_BOOSTER_PUMP, TempVSD1, TempVSD2, B_BOOST_PUMP);
-    OutOf4to20_alarm = !Check4to20(TempVSD1);
-    TempVSD1 = map_4to20(TempVSD1, SENSOR_MIN_FP, SENSOR_MAX_FP);
-    HMI.ConvertToHMI_SensorValue(TempVSD1, I_BOOSTER_PRESS, false);
-    if (OutOf4to20_alarm || BOOST_VSD.PumpState == ModbusVSD::PumpDisconnect)
-        I_BOOSTER_PRESS.alarm = true;
-    Blynk.virtualWrite(B_BOOST_PRESS, TempVSD1);
+    SET.StoreBoostPumpMins(BOOST_VSD.pumpMin);
 
     // Calculate all inputs with flows
-
     if (PermeateVM.CheckVolumeMeter(false))
     {
-        float VolumeM3 = (float)PermeateVM.Volume_L / 1000.0;
         // debugln("PERM VOL: " + String(PermeateVM.Volume_L, 1));
-        HMI.ConvertToHMI_Value(VolumeM3, VAL_PERM_VOL);
+        HMI.ConvertToHMI_Value(PermeateVM.Volume_m3, VAL_PERM_VOL);
         SET.StorePermVol(PermeateVM.Volume_L);
-        Blynk.virtualWrite(B_PRODUCT_VOLUME, VolumeM3);
     }
 
-    PermeatePM.CalculateFlow();
-    HMI.ConvertToHMI_SensorValue(PermeatePM.FlowRate, I_PERM_FLOW, SM.state == ST_SERVICE);
-    Blynk.virtualWrite(B_PERM_FLOW, PermeatePM.FlowRate);
-
-    BrinePM.CalculateFlow();
-    // debugln("Brine: " + String(BrinePM.FlowRate, 2));
-    HMI.ConvertToHMI_SensorValue(BrinePM.FlowRate, I_BRINE_FLOW, SM.state == ST_SERVICE);
-    Blynk.virtualWrite(B_BRINE_FLOW, BrinePM.FlowRate);
-
-    RecyclePM.CalculateFlow();
-    HMI.ConvertToHMI_SensorValue(RecyclePM.FlowRate, I_RECYCLE_FLOW, SM.state == ST_SERVICE);
-    Blynk.virtualWrite(B_RECYCLE_FLOW, RecyclePM.FlowRate);
-
-    // Calculate Feed Flow
-    Temp = PermeatePM.FlowRate + BrinePM.FlowRate;
-    HMI.ConvertToHMI_SensorValue(Temp, I_FEED_FLOW, SM.state == ST_SERVICE);
-    Blynk.virtualWrite(B_FEED_FLOW, Temp);
+    SM.FeedFlow = PermeatePM.FlowRate + BrinePM.FlowRate;
+    HMI.ConvertToHMI_SensorValue(SM.FeedFlow, I_FEED_FLOW, SM.state == ST_SERVICE);
 
     if (PermeatePM.FlowRate >= 10 && BrinePM.FlowRate >= 10)
-        Temp = PermeatePM.FlowRate / (Temp) * 100;
+        SM.Recovery = PermeatePM.FlowRate / (SM.FeedFlow) * 100;
     else
-        Temp = 0;
-    HMI.ConvertToHMI_Value(Temp, VAL_RECOVERY, SM.state == ST_SERVICE);
-    HMI.ConvertToHMI_SensorValue(Temp, I_RECOVERY, SM.state == ST_SERVICE);
-    Blynk.virtualWrite(B_RECOVERY, Temp);
+        SM.Recovery = 0;
+    HMI.ConvertToHMI_Value(SM.Recovery, VAL_RECOVERY, SM.state == ST_SERVICE);
+    HMI.ConvertToHMI_SensorValue(SM.Recovery, I_RECOVERY, SM.state == ST_SERVICE);
 
     if (AmbientTemp.ReadTemp())
     {
         if (AmbientTemp.currTemp >= 0)
         {
             HMI.ConvertToHMI_SensorValue(AmbientTemp.currTemp, I_TEMP);
-            Blynk.virtualWrite(B_TEMP, AmbientTemp.currTemp);
-            debugln("TEMP READ: " + String(AmbientTemp.currTemp, 1));
+            // debugln("TEMP READ: " + String(AmbientTemp.currTemp, 1));
         }
-        else
-            debugln("ERR: TEMP READ: " + String(AmbientTemp.currTemp, 1));
+        // else
+        // debugln("ERR: TEMP READ: " + String(AmbientTemp.currTemp, 1));
         // debugln("TEmp: " + String(FeedTemp.currTemp));
     }
 }
-void PumpStatusHandler(ModbusVSD &PumpVSD, Icon &I_PumpStatus, PumpValues &VAL_PumpValues, float &Analog1, float &Analog2, int BlynkPin)
+void PumpStatusHandler(ModbusVSD &PumpVSD, Icon &I_PumpStatus, PumpValues &VAL_PumpValues, float &Analog1, float &Analog2) //, int BlynkPin)
 {
-    enum
-    {
-        WHITE = 0xFFFFFF,
-        GREEN = 0x23C48E,
-        RED = 0xD3435C,
-        GREY = 0x808080
-    };
-
-    // UPDATE PUMP STATE
-    // debugln("PumpState: " + String(PumpVSD.PumpState, DEC));
     if (PumpVSD.PumpState == ModbusVSD::PumpRun && I_PumpStatus.status != On)
     {
         I_PumpStatus.ChangeStatus(On);
-        Blynk.setProperty(BlynkPin, "color", '#' + String(GREEN, HEX));
     }
     else if (PumpVSD.PumpState == ModbusVSD::PumpStop && I_PumpStatus.status != Off)
     {
-        // SM.vsdFault = false;
         I_PumpStatus.ChangeStatus(Off);
         HMI.SendPumpFault(0, I_PumpStatus);
-        Blynk.setProperty(BlynkPin, "color", '#' + String(WHITE, HEX));
     }
     else if (PumpVSD.PumpState == ModbusVSD::PumpFault && I_PumpStatus.status != Fault)
     {
@@ -225,9 +227,6 @@ void PumpStatusHandler(ModbusVSD &PumpVSD, Icon &I_PumpStatus, PumpValues &VAL_P
         if (millis() - PumpVSD.TimerFault > TEN_SEC_IN_MS)
         {
             I_PumpStatus.ChangeStatus(Fault);
-            // SM.vsdFault = true;
-            // Blynk.logEvent(BL_FAULT, "Pump VSD: F" + PumpVSD.Fault); Now in the change state
-            Blynk.setProperty(BlynkPin, "color", '#' + String(RED, HEX));
         }
         else if (I_PumpStatus.status != Warning)
         {
@@ -240,8 +239,6 @@ void PumpStatusHandler(ModbusVSD &PumpVSD, Icon &I_PumpStatus, PumpValues &VAL_P
         {
             debugln("**********PUMP DISCONNECTED");
             I_PumpStatus.ChangeStatus(Disconnected);
-            Blynk.logEvent(BL_WARNING, "VSD Disconnected");
-            Blynk.setProperty(BlynkPin, "color", '#' + String(GREY, HEX));
         }
     }
 
@@ -253,10 +250,10 @@ void PumpStatusHandler(ModbusVSD &PumpVSD, Icon &I_PumpStatus, PumpValues &VAL_P
 
     if (I_PumpStatus.status != Disconnected)
     {
-        Analog1 = PumpVSD.AnalogIn1 * 2; // this converts 2-10v to 4-20ma
+        Analog1 = PumpVSD.AnalogIn1 * 2; // this converts 2-10v to 4-20
         Analog1 /= VSD_V_FACTOR;         // divide to get the correct scaling
 
-        Analog2 = PumpVSD.AnalogIn2 * 2; // this converts 2-10v to 4-20ma
+        Analog2 = PumpVSD.AnalogIn2 * 2; // this converts 2-10v to 4-20
         Analog2 /= VSD_V_FACTOR;
 
         VAL_PumpValues.hours.val = PumpVSD.pumpMin / 60;
@@ -277,7 +274,7 @@ void CheckInputs(void)
     const uint SEC = 1000;
     const uint HUNDREDTH_SEC = 100;
 
-    SM.feedFloat_flag = FeedTankFloat.ReadInputDebounce(SEC);
+    SM.feedFloat_flag = !FeedTankFloat.ReadInputDebounce(SEC);
     // if (SM.feedFloat_flag)
     //     I_FEED_FLOAT.ChangeStatus(Fault);
     // else
@@ -285,7 +282,7 @@ void CheckInputs(void)
     //     SM.feedFloatFault = false;
     //     I_FEED_FLOAT.ChangeStatus(Off);
     // }
-    SM.feedFloatFault = FeedTankFloat.ReadInputDelay(SEC * 5, SM.feedFloat_flag); // THIS IS ADDED INSTEAD OF A WARNING EVERYTIME UF BACKWASHES (ONLY FOR INLINE)
+    SM.feedFloatFault = FeedTankFloat.ReadInputDelay(SEC, SM.feedFloat_flag); // THIS IS ADDED INSTEAD OF A WARNING EVERYTIME UF BACKWASHES (ONLY FOR INLINE)
 
     SM.productFloat_flag = ProductTankFloat.ReadInputDebounce(SEC);
 
@@ -294,6 +291,21 @@ void CheckInputs(void)
 
     SM.faultRelay_flag = FaultRelay.ReadInputDebounce(HUNDREDTH_SEC);
     // SM.faultRelayFault = FaultRelay.ReadInputDelay(SEC * 10, SM.faultRelay_flag);
+}
+void CheckFlowMeters(void)
+{
+    PermeatePM.CalculateFlowNew();
+    HMI.ConvertToHMI_SensorValue(PermeatePM.FlowRate, I_PERM_FLOW, SM.state == ST_SERVICE);
+    // Blynk.virtualWrite(B_PERM_FLOW, PermeatePM.FlowRate);
+
+    BrinePM.CalculateFlowNew();
+    // debugln("Brine: " + String(BrinePM.FlowRate, 2));
+    HMI.ConvertToHMI_SensorValue(BrinePM.FlowRate, I_BRINE_FLOW, SM.state == ST_SERVICE);
+    // Blynk.virtualWrite(B_BRINE_FLOW, BrinePM.FlowRate);
+
+    RecyclePM.CalculateFlowNew();
+    HMI.ConvertToHMI_SensorValue(RecyclePM.FlowRate, I_RECYCLE_FLOW, SM.state == ST_SERVICE);
+    // Blynk.virtualWrite(B_RECYCLE_FLOW, RecyclePM.FlowRate);
 }
 
 void StartService(void) // Function to engage valves for service
@@ -305,6 +317,7 @@ void StartService(void) // Function to engage valves for service
 
     I_INLET_VALVE.ChangeStatus(On);
     I_FLUSH_VALVE.ChangeStatus(Off);
+    I_FEED_PUMP.ChangeStatus(On);
     // I_REMIN_VALVE.ChangeStatus(On);
     // I_RO_PLANT.ChangeStatus(On);
 }
@@ -317,6 +330,7 @@ void StartFlush(void)
 
     I_INLET_VALVE.ChangeStatus(On);
     I_FLUSH_VALVE.ChangeStatus(On);
+    I_FEED_PUMP.ChangeStatus(On);
 }
 void StopAll(void)
 {
@@ -327,13 +341,13 @@ void StopAll(void)
 
     I_INLET_VALVE.ChangeStatus(Off);
     I_FLUSH_VALVE.ChangeStatus(Off);
+    I_FEED_PUMP.ChangeStatus(Off);
 }
 
 void UpdateHMI(void) // called every sec
 {
     if (HMI.currPage != P_NONE) // check if nextion is online
     {
-        I_WIFI.ChangeStatus((Status_t)Blynk.connected());
         HMI.PrintPage(ONLY_CHANGES);
         if (ezt::timeStatus() == timeSet)
         {
@@ -342,18 +356,8 @@ void UpdateHMI(void) // called every sec
         else
         {
             HMI.UpdateTimeVisibility(false);
-            if (Blynk.connected())
-                debugln("Connected but time not set");
         }
     }
-    UpdateBlynkWithInputs();
-}
-void UpdateBlynkWithInputs(void)
-{
-    Blynk.virtualWrite(B_FEED_TANK, SM.feedFloat_flag);
-    Blynk.virtualWrite(B_PRODUCT_TANK, SM.productFloat_flag);
-    Blynk.virtualWrite(B_PREFILTER_LOCKOUT, SM.backwashing_flag);
-    Blynk.virtualWrite(B_EXTERNAL_FAULT, SM.faultRelay_flag);
 }
 
 HMI_Callback_t checkCBType(char type)
@@ -371,6 +375,7 @@ HMI_Callback_t checkCBType(char type)
     case SetPressures:
     case ResetFault:
     case HandleWarning:
+    case Calibration:
         return (HMI_Callback_t)type;
         break;
     default:
@@ -383,13 +388,6 @@ bool cbNextionListen(char type, char ID, bool on_off)
     HMI_Callback_t cbType = checkCBType(type);
     switch (cbType)
     {
-    case Error:
-        debugln("cbError");
-        debug(type);
-        debugln(ID);
-        debugln(HMI.data);
-        return false;
-        break;
     case StartUp:
         SendHMI_SettingValues();
         HMI.SendStateStr(stateStr[SM.state]);
@@ -410,7 +408,7 @@ bool cbNextionListen(char type, char ID, bool on_off)
     case SetFlows:
     {
         String tempStr = "Flow -";
-        if (I_PERM_FLOW.setMinMax(joinLsbMsb(HMI.data[ID + 0], HMI.data[ID + 1]), Sensor::AlarmMin))
+        if (I_PERM_FLOW.setMinMax(joinLsbMsb(HMI.data[ID], HMI.data[ID + 1]), Sensor::AlarmMin))
         {
             SET.StoreMinPermFlow(I_PERM_FLOW.minAlarmVal);
             tempStr += (" Product Min: " + String(I_PERM_FLOW.minAlarmVal) + " LPH");
@@ -443,20 +441,20 @@ bool cbNextionListen(char type, char ID, bool on_off)
         if (I_PERM_FLOW.setMinMax(joinLsbMsb(HMI.data[ID + 12], HMI.data[ID + 13]), Sensor::FaultMin))
         {
             SET.StoreMinFaultPermFlow(I_PERM_FLOW.minFaultVal);
-            tempStr += (" Product Min: " + String(I_PERM_FLOW.minAlarmVal) + " LPH");
+            tempStr += (" Product Min: " + String(I_PERM_FLOW.minFaultVal) + " LPH");
         }
         if (I_PERM_FLOW.setMinMax(joinLsbMsb(HMI.data[ID + 14], HMI.data[ID + 15]), Sensor::FaultMax))
         {
             SET.StoreMaxFaultPermFlow(I_PERM_FLOW.maxFaultVal);
-            tempStr += (" Product Max: " + String(I_PERM_FLOW.maxAlarmVal) + " LPH");
+            tempStr += (" Product Max: " + String(I_PERM_FLOW.maxFaultVal) + " LPH");
         }
         if (I_BRINE_FLOW.setMinMax(joinLsbMsb(HMI.data[ID + 16], HMI.data[ID + 17]), Sensor::FaultMin))
         {
             SET.StoreMinFaultBrineFlow(I_BRINE_FLOW.minFaultVal);
-            tempStr += (" Concentrate Min: " + String(I_BRINE_FLOW.minAlarmVal) + " LPH");
+            tempStr += (" Concentrate Min: " + String(I_BRINE_FLOW.minFaultVal) + " LPH");
         }
         if (tempStr.length() > 15)
-            Blynk.logEvent(BL_SETTINGS, tempStr);
+            tempStr.toCharArray(B_Setting, 128);
         break;
     }
     case SetSensors:
@@ -474,18 +472,18 @@ bool cbNextionListen(char type, char ID, bool on_off)
             SET.StoreRecoveryMaxVal(VAL_RECOVERY.maxVal);
             tempStr += (" Recovery Max: " + String(VAL_RECOVERY.maxVal / 10) + "%");
         }
-        if (I_EC_PERM.setMinMax(joinLsbMsb(HMI.data[ID + 8], HMI.data[ID + 9]), Sensor::AlarmMax))
+        if (I_EC_PERM.setMinMax(joinLsbMsb(HMI.data[ID + 4], HMI.data[ID + 5]), Sensor::AlarmMax))
         {
             SET.StoreEC_AlarmVal(I_EC_PERM.maxAlarmVal);
             tempStr += (" EC Warning: " + String(I_EC_PERM.maxAlarmVal) + " mV");
         }
-        if (I_EC_PERM.setMinMax(joinLsbMsb(HMI.data[ID + 10], HMI.data[ID + 11]), Sensor::FaultMax))
+        if (I_EC_PERM.setMinMax(joinLsbMsb(HMI.data[ID + 6], HMI.data[ID + 7]), Sensor::FaultMax))
         {
             SET.StoreEC_FaultVal(I_EC_PERM.maxFaultVal);
             tempStr += (" EC Fault: " + String(I_EC_PERM.maxFaultVal) + " mV");
         }
         if (tempStr.length() > 15)
-            Blynk.logEvent(BL_SETTINGS, tempStr);
+            tempStr.toCharArray(B_Setting, 128);
         break;
     }
     case SetTimes:
@@ -507,7 +505,7 @@ bool cbNextionListen(char type, char ID, bool on_off)
             tempStr += (" Stop Flush: " + String(joinLsbMsb(HMI.data[ID + 2], HMI.data[ID + 3])) + " min");
         }
         if (tempStr.length() > 15)
-            Blynk.logEvent(BL_SETTINGS, tempStr);
+            tempStr.toCharArray(B_Setting, 128);
         break;
     }
     case SetPressures:
@@ -535,16 +533,31 @@ bool cbNextionListen(char type, char ID, bool on_off)
             tempStr += ("Delta Pressure Fault: " + String((float)I_DELTA_PRESS.maxFaultVal / 10, 1) + " bar");
         }
         if (tempStr.length() > 15)
-            Blynk.logEvent(BL_SETTINGS, tempStr);
+        {
+            tempStr.toCharArray(B_Setting, 128);
+        }
         break;
     }
     case ResetFault:
         ResetFaults();
+        SM.runButton = false;
+        HMI.UpdateUserButton(SM.runButton);
         break;
     case HandleWarning:
         WriteOutput(WARNING_LIGHT, ID);
         if (!ID)
             ResetFaults();
+        break;
+    case Calibration:
+        CalibrationHandler(ID, on_off);
+        break;
+    case Error:
+    default:
+        debugln("cbError");
+        debug(type);
+        debugln(ID);
+        debugln(HMI.data);
+        return false;
         break;
     }
     return true;
@@ -555,36 +568,43 @@ void ResetFaults(void)
 {
     if (SM.faultRelayFault && !SM.faultRelay_flag)
     {
+        // ExternalFault.ClearLog(); // rearm the fault
         SM.faultRelayFault = false;
         WriteOutput(WARNING_LIGHT, false);
     }
     if (SM.overPressFault && !I_HP_PRESS.fault)
     {
+        // MemPressFault.ClearLog(); // rearm the fault
         SM.overPressFault = false;
         WriteOutput(WARNING_LIGHT, false);
     }
     if (SM.deltaPressFault && !I_DELTA_PRESS.fault)
     {
+        dPressFault.ClearLog(); // rearm the fault
         SM.deltaPressFault = false;
         WriteOutput(WARNING_LIGHT, false);
     }
     if (SM.permeateFlowFault)
     {
+        // PermFlowFault.ClearLog(); // rearm the fault
         SM.permeateFlowFault = false;
         WriteOutput(WARNING_LIGHT, false);
     }
     if (SM.brineFlowFault)
     {
+        // BrineFlowFault.ClearLog(); // rearm the fault
         SM.brineFlowFault = false;
         WriteOutput(WARNING_LIGHT, false);
     }
     if (SM.EC_MaxFault)
     {
+        // EC_Fault.ClearLog(); // rearm the fault
         SM.EC_MaxFault = false;
         WriteOutput(WARNING_LIGHT, false);
     }
     if (SM.feedPressFault)
     {
+        // FeedPressFault.ClearLog(); // rearm the fault
         SM.feedPressFault = false;
         WriteOutput(WARNING_LIGHT, false);
     }
@@ -638,6 +658,10 @@ void ManualModeButton(uint button, bool on_off)
         // // if (HPP_VSD.PumpState != ModbusVSD::PumpDisconnect && HPP_VSD.PumpState != ModbusVSD::PumpFault)
         // //     I_RO_PUMP.ChangeStatus((Status_t)on_off);
         break;
+    case 13:
+        WriteOutput(FEED_START_STOP, !OutputStatus[FEED_START_STOP]); // Get current status of the output and toggle
+        I_FEED_PUMP.ChangeStatus((Status_t)OutputStatus[FEED_START_STOP]);
+        break;
     default:
         debugln("mnlButErr");
         break;
@@ -660,6 +684,69 @@ void ManualStateSwitch(uint state)
         break;
     }
     HMI.PrintPage();
+}
+void CalibrationHandler(char type, bool up_down)
+{
+    switch (type)
+    {
+    case 's': // save
+        SET.StoreVoltageFactor(VoltageFactor);
+        SET.StoreCurrentFactor(CurrentFactor);
+        SET.StoreSmallPM_Factor(VAL_CalibSmallPM.val);
+        SET.StoreLargePM_Factor(VAL_CalibLargePM.val);
+        break;
+    case 'd': // reset to default
+        VAL_CalibVoltage.val = DEF_VOLTAGE_FACTOR;
+        VoltageFactor = DEF_VOLTAGE_FACTOR;
+        VAL_CalibCurrent.val = DEF_CURRENT_FACTOR;
+        CurrentFactor = DEF_CURRENT_FACTOR;
+        SmallFlowFactor = DEF_SMALL_FLOW_FACTOR;
+        VAL_CalibSmallPM.val = SmallFlowFactor * VAL_CalibSmallPM.mult;
+        LargeFlowFactor = DEF_LARGE_FLOW_FACTOR;
+        VAL_CalibLargePM.val = LargeFlowFactor * VAL_CalibLargePM.mult;
+        break;
+    case 'r': // restore saved
+        SET.getCalibrationSettings();
+        break;
+    case '0': // c0 - Voltage
+        if (up_down)
+            VAL_CalibVoltage.val = ++VoltageFactor;
+        else
+            VAL_CalibVoltage.val = --VoltageFactor;
+        break;
+    case '1': // c1 - Current
+        if (up_down)
+            VAL_CalibCurrent.val = ++CurrentFactor;
+        else
+            VAL_CalibCurrent.val = --CurrentFactor;
+        break;
+    case '2': // c2 - Small PM
+        if (up_down)
+        {
+            SmallFlowFactor = VAL_CalibSmallPM.val++;
+            SmallFlowFactor /= VAL_CalibSmallPM.mult;
+        }
+        else
+        {
+            SmallFlowFactor = VAL_CalibSmallPM.val--;
+            SmallFlowFactor /= VAL_CalibSmallPM.mult;
+        }
+        break;
+    case '3': // c3 - Large PM
+        if (up_down)
+        {
+            LargeFlowFactor = VAL_CalibLargePM.val++;
+            LargeFlowFactor /= VAL_CalibLargePM.mult;
+        }
+        else
+        {
+            LargeFlowFactor = VAL_CalibLargePM.val--;
+            LargeFlowFactor /= VAL_CalibLargePM.mult;
+        }
+        break;
+    default:
+        break;
+    }
 }
 
 // NVS FILE SYSTEM
@@ -695,6 +782,11 @@ void Save::initialise(void)
     StoreRO_PumpMins(HPP_VSD.pumpMin);
     StoreBoostPumpMins(BOOST_VSD.pumpMin);
     StorePermVol(PermeateVM.Volume_L);
+
+    StoreVoltageFactor(VoltageFactor);
+    StoreCurrentFactor(CurrentFactor);
+    StoreSmallPM_Factor(DEF_SMALL_FLOW_FACTOR * VAL_CalibSmallPM.mult);
+    StoreLargePM_Factor(DEF_LARGE_FLOW_FACTOR * VAL_CalibLargePM.mult);
 }
 void Save::getAllSettings(void) // get all saved settings
 {
@@ -728,7 +820,19 @@ void Save::getAllSettings(void) // get all saved settings
 
     HPP_VSD.pumpMin = getUIntIfExist(pMin_k, 0);
     PermeateVM.Volume_L = getUIntIfExist(volP_k, 0);
+    getCalibrationSettings();
     debugln("Free Entries: " + String(freeEntries(), DEC));
+}
+void Save::getCalibrationSettings(void)
+{
+    VoltageFactor = getUshortIfExist(vftr_k, DEF_VOLTAGE_FACTOR);
+    VAL_CalibVoltage.val = VoltageFactor;
+    CurrentFactor = getUshortIfExist(cftr_k, DEF_CURRENT_FACTOR);
+    VAL_CalibCurrent.val = CurrentFactor;
+    SmallFlowFactor = (float)getUshortIfExist(PMsm_k, DEF_SMALL_FLOW_FACTOR * VAL_CalibSmallPM.val) / VAL_CalibSmallPM.mult;
+    HMI.ConvertToHMI_Value(SmallFlowFactor, VAL_CalibSmallPM, false);
+    LargeFlowFactor = (float)getUshortIfExist(PMlg_k, DEF_LARGE_FLOW_FACTOR * VAL_CalibLargePM.val) / VAL_CalibLargePM.mult;
+    HMI.ConvertToHMI_Value(LargeFlowFactor, VAL_CalibLargePM, false);
 }
 bool Save::getBoolIfExist(const char *key, bool defVal)
 {
@@ -757,7 +861,6 @@ uint Save::getUIntIfExist(const char *key, uint defVal)
     debugln(String(key) + " not found");
     return defVal;
 }
-
 void Save::FileSetup(void)
 {
     if (begin()) // open in read/write mode
@@ -770,6 +873,15 @@ void Save::FileSetup(void)
     }
     else
         debug("NVS didnt open");
+}
+long Save::getLongIfExist(const char *key, long defVal)
+{
+    if (settings.isKey(key))
+        return settings.getLong(key);
+    else
+        settings.putLong(key, defVal);
+    debugln(String(key) + " not found");
+    return defVal;
 }
 
 void StateMachineRO::RunStateMachine(void)
@@ -811,11 +923,11 @@ void StateMachineRO::RunStateMachine(void)
         SecNow++;
         break;
     case ST_TANK_FULL:
-        if (!productFloat_flag)
+        if (!productFloat_flag || !runButton)
             ChangeState(ST_STOPPED);
         break;
     case ST_PREFILTER:
-        if (!backwashing_flag)
+        if (!backwashing_flag || !runButton)
             ChangeState(ST_STOPPED);
         break;
     case ST_VSD_FAULT:
@@ -824,34 +936,43 @@ void StateMachineRO::RunStateMachine(void)
         break;
     case ST_FEED_EMPTY:
         if (!feedFloatFault)
+        {
+            if (inline_mode)
+                ChangeState(ST_START_FLUSH);
+            else
+                ChangeState(ST_STOPPED);
+        }
+        if (!runButton)
+        {
             ChangeState(ST_STOPPED);
+        }
         break;
     case ST_EXT_FAULT:
-        if (!faultRelayFault)
+        if (!faultRelayFault || !runButton)
             ChangeState(ST_STOPPED);
         break;
     case ST_OVER_P_FAULT:
-        if (!overPressFault)
+        if (!overPressFault || !runButton)
             ChangeState(ST_STOPPED);
         break;
     case ST_D_P_FAULT:
-        if (!deltaPressFault)
+        if (!deltaPressFault || !runButton)
             ChangeState(ST_STOPPED);
         break;
     case ST_PROD_FLOW_FAULT:
-        if (!permeateFlowFault)
+        if (!permeateFlowFault || !runButton)
             ChangeState(ST_STOPPED);
         break;
     case ST_BRINE_FLOW_FAULT:
-        if (!brineFlowFault)
+        if (!brineFlowFault || !runButton)
             ChangeState(ST_STOPPED);
         break;
     case ST_EC_FAULT:
-        if (!EC_MaxFault)
+        if (!EC_MaxFault || !runButton)
             ChangeState(ST_STOPPED);
         break;
     case ST_FEED_P_FAULT:
-        if (!feedPressFault)
+        if (!feedPressFault || !runButton)
             ChangeState(ST_STOPPED);
         break;
     case ST_MANUAL:
@@ -913,12 +1034,12 @@ void StateMachineRO::CheckWarningsFaults(void)
         HMI.AddWarning(dPressWarning, W_None);
         HMI.ActivateCIPWarning();
     }
-    // if (FeedTankWarning.CheckIfWarningTriggered(feedFloat_flag))
-    // {
-    //     feedFloatFault = true;
-    //     // HMI.AddFault(FeedTankWarning, W_None);
-    //     HMI.AddWarning(FeedTankWarning, W_None); // Changed to warning to allow a reset
-    // }
+    if (!inline_mode && FeedTankWarning.CheckIfWarningTriggered(feedFloat_flag))
+    {
+        feedFloatFault = true;
+        HMI.AddFault(FeedTankWarning, W_None); // back to fault because of inline mode
+        // HMI.AddWarning(FeedTankWarning, W_None); // Changed to warning to allow a reset
+    }
 
     // FAULTS
     if (PermFlowFault.CheckIfWarningTriggered(I_PERM_FLOW.fault))
@@ -940,7 +1061,7 @@ void StateMachineRO::CheckWarningsFaults(void)
     }
     if (FeedPressFault.CheckIfWarningTriggered(I_FEED_PRESS.fault))
     {
-        HMI.AddFault(FeedPressFault, type);
+        HMI.AddFault(FeedPressFault, W_Low);
         feedPressFault = true;
     }
     if (MemPressFault.CheckIfWarningTriggered(I_HP_PRESS.fault))
@@ -965,12 +1086,15 @@ void StateMachineRO::ChangeState(state_t nextState)
     {
     case ST_START_FLUSH:
         StartFlush();
+        StartFlushChecks();
         break;
     case ST_SERVICE:
         StartService();
+        InServiceChecks();
         break;
     case ST_STOP_FLUSH:
         StartFlush();
+        StopFlushChecks();
         break;
     default:
         StopAll();
@@ -986,55 +1110,49 @@ void StateMachineRO::ChangeState(state_t nextState)
         case ST_VSD_FAULT:
             HMI.AddFault(VSD_Fault);
             WriteOutput(WARNING_LIGHT, true);
-            Blynk.logEvent(BL_FAULT, "Pump VSD: F" + String(HPP_VSD.Fault));
             break;
         case ST_FEED_EMPTY:
-            // WriteOutput(WARNING_LIGHT, true);
-            Blynk.logEvent(BL_FAULT, "Feed Tank Low");
+            if (inline_mode)
+                WriteOutput(FEED_START_STOP, HIGH);
+            else
+                WriteOutput(WARNING_LIGHT, HIGH);
             break;
         case ST_EXT_FAULT:
             HMI.AddFault(ExternalFault);
-            WriteOutput(WARNING_LIGHT, true);
-            Blynk.logEvent(BL_FAULT, "External Fault Input");
+            WriteOutput(WARNING_LIGHT, HIGH);
             break;
         case ST_OVER_P_FAULT:
             HMI.AddFault(MemPressFault);
-            WriteOutput(WARNING_LIGHT, true);
-            Blynk.logEvent(BL_FAULT, "Over Max Pressure" + String((float)I_HP_PRESS.value / 10, 1) + " bar");
+            WriteOutput(WARNING_LIGHT, HIGH);
             break;
         case ST_D_P_FAULT:
             HMI.AddFault(dPressFault);
             HMI.ActivateCIPWarning();
-            WriteOutput(WARNING_LIGHT, true);
-            Blynk.logEvent(BL_FAULT, "Max Delta Pressure " + String((float)I_DELTA_PRESS.value / 10, 1) + " bar");
+            WriteOutput(WARNING_LIGHT, HIGH);
             break;
         case ST_PROD_FLOW_FAULT:
             HMI.AddFault(PermFlowFault, (I_PERM_FLOW.checkFaultMin() ? W_Low : W_High));
             // HMI.ActivateCIPWarning();    TODO check if this should be here
-            WriteOutput(WARNING_LIGHT, true);
-            Blynk.logEvent(BL_FAULT, "Permeate Flow " + String(I_PERM_FLOW.value) + " LPH");
+            WriteOutput(WARNING_LIGHT, HIGH);
             break;
         case ST_BRINE_FLOW_FAULT:
             HMI.AddFault(BrineFlowFault);
-            WriteOutput(WARNING_LIGHT, true);
-            Blynk.logEvent(BL_FAULT, "Check Brine Valve - Flow Too Low");
+            WriteOutput(WARNING_LIGHT, HIGH);
             break;
         case ST_EC_FAULT:
             HMI.AddFault(EC_Fault);
-            WriteOutput(WARNING_LIGHT, true);
-            Blynk.logEvent(BL_FAULT, "EC High Fault");
+            WriteOutput(WARNING_LIGHT, HIGH);
             break;
         case ST_FEED_P_FAULT:
             HMI.AddFault(FeedPressFault);
-            WriteOutput(WARNING_LIGHT, true);
-            Blynk.logEvent(BL_FAULT, "Max Membrane Delta Pressure");
+            WriteOutput(WARNING_LIGHT, HIGH);
             break;
         case ST_MANUAL:
             runButton = false;
             B_USER_ON_OFF.on_off = runButton;
             HMI.SendButtonPicVal(B_USER_ON_OFF);
             // SET.StoreRunButton(B_USER_ON_OFF.on_off);
-            WriteOutput(WARNING_LIGHT, false);
+            WriteOutput(WARNING_LIGHT, LOW);
             break;
         default:
             debug("Error non existent state:");
@@ -1046,9 +1164,7 @@ void StateMachineRO::ChangeState(state_t nextState)
 
     if (HMI.currPage != P_NONE)
     {
-        if (state != ST_STOP_FLUSH)
-            HMI.SendStateStr(stateStr[state]);
-        else
+        if (state == ST_STOP_FLUSH)
         {
             if (stateAfterFlush == ST_STOPPED)
                 HMI.SendStateStr((String(stateStr[state]) + " - User").c_str());
@@ -1059,10 +1175,14 @@ void StateMachineRO::ChangeState(state_t nextState)
             else
                 HMI.SendStateStr((String(stateStr[state]) + " - Fault").c_str());
         }
+        else if (inline_mode && state == ST_FEED_EMPTY)
+        {
+            HMI.SendStateStr("No Feed");
+        }
+        else
+            HMI.SendStateStr(stateStr[state]);
         HMI.PrintPage(ONLY_CHANGES);
     }
-    Blynk.logEvent(BL_STATE_CHANGE, stateStr[state]);
-    Blynk.virtualWrite(B_STATE, stateStr[state]);
 }
 void StateMachineRO::StartFlushChecks(void)
 {
@@ -1123,10 +1243,10 @@ bool cbHPP_ReadHreg(Modbus::ResultCode event, uint16_t transactionId, void *data
 { // Callback from Modbus to monitor errors
     if (event != Modbus::EX_SUCCESS)
     {
-        debug("Request result: 0x");
-        debugBase(event, HEX);
-        debug("\tMB state: ");
-        debugln(HPP_VSD.MBstate);
+        // debug("Request result: 0x");
+        // debugBase(event, HEX);
+        // debug("\tMB state: ");
+        // debugln(HPP_VSD.MBstate);
 
         HPP_VSD.PumpState = ModbusVSD::PumpDisconnect;
         HPP_VSD.IncrementVSD_Index();
@@ -1140,15 +1260,14 @@ bool cbHPP_ReadHreg(Modbus::ResultCode event, uint16_t transactionId, void *data
     // debugln();
     return true;
 }
-
 bool cbBoosterReadHreg(Modbus::ResultCode event, uint16_t transactionId, void *data)
 { // Callback from Modbus to monitor errors
     if (event != Modbus::EX_SUCCESS)
     {
-        debug("Request result: 0x");
-        debugBase(event, HEX);
-        debug("\tMB state: ");
-        debugln(BOOST_VSD.MBstate);
+        // debug("Request result: 0x");
+        // debugBase(event, HEX);
+        // debug("\tMB state: ");
+        // debugln(BOOST_VSD.MBstate);
 
         BOOST_VSD.PumpState = ModbusVSD::PumpDisconnect;
         BOOST_VSD.IncrementVSD_Index();
@@ -1163,59 +1282,30 @@ bool cbBoosterReadHreg(Modbus::ResultCode event, uint16_t transactionId, void *d
     return true;
 }
 
-void RunStateMachine(void) { SM.RunStateMachine(); };
-void TimerSetup(void)
-{
-    edgentTimer.setInterval(1000, RunStateMachine);
-    edgentTimer.setInterval(10, CheckInputs);
-    edgentTimer.setInterval(500, CheckSensors);
-    edgentTimer.setInterval(1000, UpdateHMI);
-    edgentTimer.setInterval(86400000, RequestBlynkTimeUpdate); // update time daily
-    Blynk.logEvent(BL_STATE_CHANGE, "Controller Startup");
-    CheckInputs();
-    CheckSensors();
-    SM.ChangeState(ST_STOPPED);
-}
 void RunAnalog(ADS1115 &ADC_ref)
 {
-    // if(ADC_ref.isConnected()&&ADC_ref)
-    // {
-    // }
-}
-void BlynkLoop(void *pvParameters)
-{
-    vTaskDelay(100 / portTICK_PERIOD_MS);
-    BlynkEdgent.begin();
-    vTaskDelay(100 / portTICK_PERIOD_MS);
-    for (;;) // loop
-    {
-        BlynkEdgent.run();
-        vTaskDelay(1 / portTICK_PERIOD_MS);
-    }
-}
-void RequestBlynkTimeUpdate(void)
-{
-    Blynk.sendInternal("utc", "time"); // Unix timestamp (with msecs)
-}
+    static uint sample = 0;
+    static uint channel = 0;
 
-BLYNK_CONNECTED()
-{
-    Blynk.sendInternal("utc", "time");    // Unix timestamp (with msecs)
-    Blynk.sendInternal("utc", "tz_rule"); // POSIX TZ rule
-}
-BLYNK_WRITE(InternalPinUTC)
-{
-    String cmd = param[0].asStr();
-    if (cmd == "time")
+    if (ADC_ref.isConnected() && ADC_ref.isReady() && !readComplete)
     {
-        const uint64_t utc_time = param[1].asLongLong();
-        UTC.setTime(utc_time / 1000, utc_time % 1000);
-        // Serial.print("Unix time (UTC): "); Serial.println(utc_time);
-    }
-    else if (cmd == "tz_rule")
-    {
-        String tz_rule = param[1].asStr();
-        local.setPosix(tz_rule);
-        // Serial.print("POSIX TZ rule:   "); Serial.println(tz_rule);
+        static int sumVal = 0;
+        sumVal += ADC_ref.getValue();
+        sample++;
+        if (sample == NumADC_samples)
+        {
+            AnalogIn[channel] = (float)sumVal / NumADC_samples;
+            // AnalogNew[channel] = true;
+            sumVal = 0;
+            sample = 0;
+            if (channel < 3)
+                channel++;
+            else
+            {
+                channel = 0; //  request a new one
+                readComplete = true;
+            }
+        }
+        ADC_ref.requestADC(channel);
     }
 }

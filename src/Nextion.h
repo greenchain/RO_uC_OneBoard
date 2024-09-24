@@ -37,6 +37,7 @@ const uint8_t SensorBkgndPics[5] = {1, 2, 2, 2, 2}; // background (picc)
 const uint8_t ValvePics[5] = {11, 12, 12, 12, 12};  // Off, On
 const uint8_t FRP_Pics[5] = {13, 14, 14, 14, 14};   // Off, On
 const uint8_t PumpPics[5] = {15, 16, 17, 18, 18};   // Off, On, Fault, Warning/disconnect(orange)
+const uint8_t SmlButtonPics[5] = {22, 23, 22, 22, 22};
 // const uint8_t DosingPics[5] = {19, 20, 21, 22, 22};
 const uint8_t FloatPics[5] = {20, 21, 20, 20, 20};
 
@@ -70,7 +71,9 @@ enum Page_t
     P_MANUAL_OLD = 0xa5,
     P_POPUP = 0xa6,
     P_SLEEP = 0xa7,
-    P_GLOBAL = 0xa8 // should never go here
+    P_GLOBAL = 0xa8, // should never go here
+    P_PIN = 0xa9,    // This doesnt report
+    P_CALIBRATE = 0xaa
 };
 enum IconType_t
 {
@@ -167,6 +170,7 @@ struct Value
     bool checkMin(void) { return (val < minVal); }
     bool checkMax(void) { return (val >= maxVal); }
 };
+
 struct PumpValues
 {
     Value hours;
@@ -183,6 +187,7 @@ struct PumpValues
           frequency('x', freqSN, ONE_DECIMAL, 0, 500),
           power('x', pwrSN, ONE_DECIMAL) {}
 };
+
 struct Icon
 {
     Status_t status = Off;
@@ -197,6 +202,7 @@ struct Icon
     Icon(IconType_t IconType, uint8_t SeqNo, const uint8_t *Pics); //, uint8_t offPic, uint8_t onPic, uint8_t warningPic = 0, uint8_t faultPic = 0, uint8_t disconnectPic = 0);
     void ChangeStatus(Status_t newStatus) { status = newStatus; }
 };
+
 struct Sensor
 {
     SensorType_t type;
@@ -262,6 +268,7 @@ struct Sensor
     // void resetMax(void) { maxVal = UINT_MAX; }
     // void resetMin(void) { minVal = 0; }
 };
+
 struct TankBar
 {
     uint16_t c_ALARM = 63488; // RED
@@ -300,6 +307,7 @@ struct TankBar
     bool checkMin(void) { return (value < minVal); }
     bool checkMax(void) { return (value >= maxVal); }
 };
+
 struct Button
 {
     bool on_off = false;
@@ -360,11 +368,15 @@ public:
             snprintf(OutputStr, txt_maxl, "%s%s", PreStr, WarningString);
     }
     char *getOutputStr() { return &OutputStr[0]; }
+    void ResetTimer(void)
+    {
+        Timer.ResetTimer();
+        Timer.setStatus(false);
+    }
     void ClearLog(void)
     {
         WarningLogged = false;
-        Timer.ResetTimer();
-        Timer.setStatus(false);
+        ResetTimer();
     }
 };
 
@@ -382,7 +394,7 @@ private:
 
     uint WarningCntr = 0;
     Warnings *ActiveWarnings[MAX_NUM_WARNINGS] = {nullptr};
-    uint WarningIndex = 0;\
+    uint WarningIndex = 0;
     int lastSentDay = -1;
     int lastSentMin = -1;
 
@@ -398,10 +410,11 @@ private:
         H_SENSORS_SET = 0xb2,
         H_TIME_SET = 0xb3,
         H_PRESS_SET = 0xb4,
-        H_SYSTEM_SET = 0xb5,
+        // H_SYSTEM_SET = 0xb5,
         H_WARNING = 'w',
         H_RESET = 'r',
-        H_RTC = 'c' // deprecated with Blynk
+        H_CALIBRATION = 'c'
+        // H_RTC = 'c' // deprecated with Blynk
     };
 
     // bool sleep = 0;
@@ -427,6 +440,7 @@ public:
     char data[MAX_DATA_SIZE + 1] = {0};
     Nextion(uint baud, uint Nextion_TX, uint Nextion_RX); // done
     void ChangePage(uint nextPage);
+    void UpdateUserButton(bool on_off);
     void setCallback(cbNextion_t _cb) { cbNextion = _cb; }
     void Startup(void);
     void SendStartupValues(void);

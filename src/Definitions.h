@@ -7,8 +7,9 @@
 #include "MyModbus.h"
 
 //********************** CALIBRATION **********************
-#define VoltageFactor 2670
-#define CurrentFactor 1280
+#define DEF_VOLTAGE_FACTOR 2670
+#define DEF_CURRENT_FACTOR 1280
+#define NumADC_samples 40
 
 /*Constants FOR RO CONTROLLER*/
 #define SENSOR_MIN_EC 0.0F
@@ -18,12 +19,12 @@
 #define SENSOR_MAX_FP 10.0F
 
 #define SENSOR_MIN_HP 0.0F
-#define SENSOR_MAX_HP 25.0F
+#define SENSOR_MAX_HP 10.0F // TODO 25.0F for dinaka
 
 #define VSD_V_FACTOR 100
 
-#define SMALL_FLOW_FACTOR 60 / 5.76 // 60 / 4.8
-#define LARGE_FLOW_FACTOR 60 / 0.55 // 60 / 0.5
+#define DEF_SMALL_FLOW_FACTOR 5.76F // 60 / 4.8
+#define DEF_LARGE_FLOW_FACTOR 0.55F // 60 / 0.5
 
 // PINS
 // Relay Outputs
@@ -75,7 +76,7 @@ const char stateStr[][30] = {
     "Product Tank Full",
     "Prefilter Lockout",
     "VSD Fault",
-    "No Feed",
+    "Feed Tank Low",
     "External Fault",
     "Overpressure Fault",
     "dP Membrane Fault",
@@ -97,8 +98,11 @@ enum HMI_Callback_t
     SetTimes = 0xb3,
     SetPressures = 0xb4,
     ResetFault = 'r',
-    HandleWarning = 'w'
+    HandleWarning = 'w',
+    Calibration = 'c'
 };
+
+extern SemaphoreHandle_t xSemaphore;
 
 extern Nextion HMI;
 extern ADS1115 ADC_1;
@@ -123,6 +127,7 @@ extern Icon I_WIFI;
 // Main page
 extern Icon I_RO_PUMP;
 extern Icon I_BOOSTER_PUMP;
+extern Icon I_FEED_PUMP;
 
 extern Icon I_BW_VALVE;
 extern Icon I_INLET_VALVE;
@@ -150,30 +155,53 @@ extern PumpValues PVAL_BOOSTER_PUMP;
 extern Value VAL_RECOVERY;
 extern Value VAL_PERM_VOL;
 
+extern Value VAL_CalibVoltage;
+extern Value VAL_CalibCurrent;
+extern Value VAL_CalibSmallPM;
+extern Value VAL_CalibLargePM;
+
+extern Value VAL_A0_Current;
+extern Value VAL_A1_Current;
+extern Value VAL_A2_Current;
+extern Value VAL_A3_Current;
+
+extern Value VAL_A0_Voltage;
+extern Value VAL_A1_Voltage;
+extern Value VAL_A2_Voltage;
+extern Value VAL_A3_Voltage;
+
+// Blynk strings
+// extern char B_State[128];
+// extern char B_Warning[128];
+// extern char B_Fault[128];
+extern char B_Setting[128];
+
+void RunCoreFunctions(void);
+
 bool cbHPP_ReadHreg(Modbus::ResultCode event, uint16_t transactionId, void *data);
 bool cbBoosterReadHreg(Modbus::ResultCode event, uint16_t transactionId, void *data);
-void PumpStatusHandler(ModbusVSD &PumpVSD, Icon &I_PumpStatus, PumpValues &VAL_PumpValues, float &Analog1, float &Analog2, int BlynkPin);
+void PumpStatusHandler(ModbusVSD &PumpVSD, Icon &I_PumpStatus, PumpValues &VAL_PumpValues, float &Analog1, float &Analog2); //, int BlynkPin);
 void CheckSensors(void);
 void CheckInputs(void);
+void CheckFlowMeters(void);
 void StartService(void);
 void StartFlush(void);
 // void StartBypass(void);
 // void StopBypass(void);
 void StopAll(void);
 void UpdateHMI(void);
-void UpdateBlynkWithInputs(void);
+
 bool cbNextionListen(char type, char ID, bool on_off);
 void ResetFaults(void);
 HMI_Callback_t checkCBType(char type);
 void SendHMI_SettingValues(void);
 void ManualModeButton(uint button, bool on_off);
 void ManualStateSwitch(uint state);
+void CalibrationHandler(char type, bool up_down);
 
-void RunStateMachine(void);
 void TimerSetup(void);
-void RunAnalog(ADS1115 &ADC_ref);
 void BlynkLoop(void *pvParameters);
-void RequestBlynkTimeUpdate(void);
+void RunAnalog(ADS1115 &ADC_ref);
 
 // NON-VOLATILE STORAGE CLASS
 class Save
@@ -213,8 +241,10 @@ private:
     const char volF_k[4] = "vlF"; //
     const char volP_k[4] = "vlP"; //
 
-    // for wifi expansion
-    const char ver_k[4] = "VER";
+    const char cftr_k[4] = "cft"; // current conversion factor
+    const char vftr_k[4] = "vft"; // voltage conversion factor
+    const char PMsm_k[4] = "PMs"; // small pulse meter factor
+    const char PMlg_k[4] = "PMl"; // large pulse meter factor
 
     Preferences settings; // File system Instance that saves settings based on a key
 
@@ -227,6 +257,7 @@ private:
     bool getBoolIfExist(const char *key, bool defVal);
     uint16_t getUshortIfExist(const char *, uint16_t defVal);
     uint getUIntIfExist(const char *key, uint defVal);
+    long getLongIfExist(const char *key, long defVal);
 
 public:
     const uint MIN_BETWEEN_SAVE = 6;
@@ -238,6 +269,7 @@ public:
     //  Functions for saving/retrieving saved variables
     void FileSetup(void);
     void StoreRunButton(bool butStatus) { settings.putBool(u_but_k, butStatus); }
+    void getCalibrationSettings(void);
 
     void StoreMinPermFlow(uint16_t minFlow) { settings.putUShort(minpf_k, minFlow); }
     void StoreMaxPermFlow(uint16_t maxFlow) { settings.putUShort(maxpf_k, maxFlow); }
@@ -286,6 +318,11 @@ public:
             LastSavedPermVol = Volume;
         }
     }
+
+    void StoreVoltageFactor(uint16_t factor) { settings.putUShort(vftr_k, factor); }
+    void StoreCurrentFactor(uint16_t factor) { settings.putUShort(cftr_k, factor); }
+    void StoreSmallPM_Factor(uint16_t factor) { settings.putUShort(PMsm_k, factor); }
+    void StoreLargePM_Factor(uint16_t factor) { settings.putUShort(PMlg_k, factor); }
     size_t freeEntries(void) { return settings.freeEntries(); }
 };
 
@@ -294,6 +331,8 @@ class StateMachineRO
 private:
 public:
     // variables
+    bool inline_mode = true;
+
     bool runButton = false;
     bool backwashing_flag = false;
     bool productFloat_flag = false;
@@ -311,14 +350,25 @@ public:
     bool EC_MaxFault = false;
     bool feedPressFault = false;
 
+    bool logBlynkStateChange = false;
 
     state_t state = ST_STOPPED;
     state_t stateAfterFlush = ST_STOPPED;
 
+    /* ANALOG INPUTS */
     // float PH = SENSOR_MIN_PH;
     // float ORP = SENSOR_MIN_ORP;
     float EC = SENSOR_MIN_EC;
     float FeedPressure = 0.0;
+
+    /* MODBUS INPUTS */
+    float HP_Pressure = 0.0;
+    float PostMemPressure = 0.0;
+    float DeltaMemPressure = 0.0;
+    float BoostPressure = 0.0;
+
+    float FeedFlow = 0.0;
+    float Recovery = 0.0;
 
     // TankLevelSensor ProductTank;
 

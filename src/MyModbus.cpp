@@ -52,6 +52,8 @@ void ModbusVSD::RunModbus(void)
                     else
                     {
                         State = _data[0];
+                        // debug("Pump state: ");
+                        // debugln((char*)_data);
                         MBstate = MB_ReadFault;
                     }
                     requestSent = false;
@@ -77,6 +79,8 @@ void ModbusVSD::RunModbus(void)
                     else
                     {
                         Fault = _data[0];
+                        // debug("Fault: ");
+                        // debugln((char*)_data);
                         if (Fault == 0)
                         {
                             if (State == 1 or State == 2) // running
@@ -111,6 +115,9 @@ void ModbusVSD::RunModbus(void)
                 }
                 else
                 {
+                    // debug("Values: ");
+                    // debugln((char*)_data);
+                    // debugln();
                     if (PumpState != PumpDisconnect)
                     {
                         Frequency = _data[0];  // U0-00

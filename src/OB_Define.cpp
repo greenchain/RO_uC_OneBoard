@@ -40,12 +40,12 @@ void PinSetup(void)
 
 bool AnalogSetup(ADS1115 &AnalogDC)
 {
-    if (Wire.begin())
+    if (Wire.begin(S_DATA, S_CLK))
     {
         if (AnalogDC.begin())
         {
-            AnalogDC.setGain(1);     //  +/-4 volt -  2mV unit
-            AnalogDC.setDataRate(5); //  [0-7] = {8, 16, 32, 64, 128, 250, 475, 860} SPS
+            AnalogDC.setGain(0);     //  +/-4 volt -  2mV unit
+            AnalogDC.setDataRate(7); //  [0-7] = {8, 16, 32, 64, 128, 250, 475, 860} SPS
             AnalogDC.setMode(1);     //  continuous mode = 0 , single = 1
             return true;
         }
@@ -97,6 +97,7 @@ bool VolumeMeter::CheckVolumeMeter(bool calculateFlow)
     if (current_status == true && _last_status == false) // RISING PULSE
     {
         Volume_L += _L_PER_PULSE;
+        Volume_m3 = (float)Volume_L / 1000.0;
         if (calculateFlow)
         {
             if (firstEntry)
@@ -140,31 +141,79 @@ float VolumeMeter::CalculateFlow(uint timeDiff)
 }
 
 // this is written for any time period. Can be made much simpler by calling at a set period and reducing the float calculations and therefore processor overhead
-void PulseMeter::CalculateFlow()
+void PulseMeter::CalculateFlow(bool calcVolume)
 {
-    const uint div = 5;
-    uint timeDiff = millis() - _timeStamp;
-    _timeStamp = millis();
-    float temp = Pulses;
     if (Pulses)
     {
-        // debugln("here:" + String(temp,0));
+        uint timeDiff = millis() - _timeStamp;
+        _timeStamp = millis();
+        uint tempPulses = Pulses;
         Pulses = 0;
-        volumePulses += (uint)temp;
-        while (volumePulses >= 288)
+        float temp = (float)tempPulses * 1000; // this is for the ms to second conversion of timeDiff
+        if (calcVolume)
         {
-            Volume++;
-            volumePulses -= 288;
+            volumePulses += tempPulses;
+            while (volumePulses >= 288)
+            {
+                Volume++;
+                volumePulses -= 288;
+            }
         }
-        temp = (temp * 1000) / timeDiff; // pulses / timeDiff (ms) * 1000 (ms/s) = PulsesPerSecond
-        temp *= _FLOW_FACTOR;
-        FlowRate = (FlowRate * (div - 1) + temp) / div;
+        // temp /= timeDiff; // pulses / timeDiff (ms) * 1000 (ms/s) = PulsesPerSecond
+        temp *= *_FLOW_FACTOR / timeDiff; // TODO compare this with UF
+        FlowRate = (FlowRate * (_div - 1) + temp) / _div;
         // cummulativeFlow += temp - (cummulativeFlow / div);
         // FlowRate = cummulativeFlow / div; // flow = pulsesPerSecond * Flow_Factor - answer in litres per hour}
     }
     else
     {
         // cummulativeFlow = 0;
+        FlowRate = 0.0F;
+    }
+}
+
+void PulseMeter::CalculateFlowNew(bool calcVolume)
+{
+    uint timeDiff = millis() - _timeStamp;
+    if (millis() - _pulseTimeStamp < _timeOut)
+    {
+        if (time_for_pulses_ms)
+        {
+            float localTimeMs = time_for_pulses_ms;
+            time_for_pulses_ms = 0;
+            float freq = 1000.0F * PULSE_SAMPLES / localTimeMs;
+            float temp = freq * 60.0F / *_FLOW_FACTOR; // conver to lph from lpm and divide by the manufacturer flow factor
+            FlowRate = (FlowRate * (_div - 1) + (temp)) / _div;
+            // if (_inputPin == D_IN_4)
+            //     debug("Product");
+            // else if (_inputPin == D_IN_5)
+            //     debug("Waste");
+            // else
+            //     debug("X-flow");
+            // debug(" - time: ");
+            // debug((uint)localTimeMs);
+            // debug("ms\tfreq: ");
+            // debug(freq);
+            // debug("Hz\tFF: ");
+            // debug(*_FLOW_FACTOR);
+            // debug("\tFlowRate: ");
+            // debugln(temp);
+            // debugln();
+            if (calcVolume)
+            {
+                volumePulses += PULSE_SAMPLES;
+                while (volumePulses >= _pulsePerLitre)
+                {
+                    Volume++;
+                    volumePulses -= _pulsePerLitre;
+                }
+            }
+        }
+    }
+    else
+    {
+        // _pulseTimeStamp = millis();
+        // Pulses = 0;
         FlowRate = 0.0F;
     }
 }
@@ -219,6 +268,7 @@ TempSensor::TempSensor()
 {
     DS18S20.begin();        // Initialise Temperature sensor
     _index = _indexCount++; // store index and increment global index
+    // _indexCount++;
     delay(100);
     if (!DS18S20.getDeviceCount()) // if no temperature sensor found
     {
@@ -241,7 +291,7 @@ TempSensor::TempSensor()
         _timeStamp = millis();
         // _readingPeriod = DS18S20.millisToWaitForConversion()
         _readingPeriod = (DS18S20.getResolution() < 12 ? 520 : 750); // in testing the library/datasheet numbers were too short for anyhting below 12bit..  (11 - 9 bit ~ 508ms)
-
+        debugln("Temperature sensor found");
         connected = true;
     }
 }

@@ -57,7 +57,7 @@
 #define D_OUT_7 17
 #define D_OUT_8 18
 
-#define OUTPUT_MAX 19 // highest output pin number plus 1  
+#define OUTPUT_MAX 19 // highest output pin number plus 1
 // #define STATUS_LED 48 -- version 1.0
 #define STATUS_LED 1
 
@@ -77,18 +77,18 @@
 
 // I2C
 #define S_DATA 48
-#define S_CLK 47 
+#define S_CLK 47
 // vvv Version 1 vvv
 // #define S_DATA 8
 // #define S_CLK 9
 
 #define DEF_TANK_LEVEL_SENSOR_MAX 5000
 extern Timezone local;
-extern bool OutputStatus[];
+extern bool OutputStatus[OUTPUT_MAX];
 
 // Functions
 void PinSetup(void);
-// inline bool ReadInput(uint inputPin) { return !digitalRead(inputPin); } -- Version 0.1 
+// inline bool ReadInput(uint inputPin) { return !digitalRead(inputPin); } -- Version 0.1
 bool ReadInput(uint inputPin);
 void WriteOutput(uint outputPin, bool val);
 bool AnalogSetup(ADS1115 &AnalogDC);
@@ -98,7 +98,7 @@ inline float map_4to20(float x, float out_min, float out_max) { return (x - 4.0F
 class VolumeMeter
 {
 private:
-    bool firstEntry=true;
+    bool firstEntry = true;
     uint8_t _inputPin;
     bool _last_status;
     ulong _timeStamp = 0;
@@ -110,27 +110,42 @@ private:
 public:
     float FlowRate = 0; // flow rate in lph
     uint Volume_L = 0;
+    float Volume_m3 = 0;
 
     VolumeMeter(uint8_t inputPin, uint lpp = 5) : _L_PER_PULSE(lpp) { _inputPin = inputPin; }
-    bool CheckVolumeMeter(bool calculateFlow = true);
+    bool CheckVolumeMeter(bool calcFlow = false);
 };
 
 class PulseMeter
 {
 private:
     uint8_t _inputPin;
+    uint _timeOut = 3000;
     ulong _timeStamp = 0;
+    ulong _pulseTimeStamp = 0;
+    uint _pulsePerLitre = 288;
     // TODO below may need to be calibrated per size 4.8 is the calibration for small meter (1/2 inch)
-    float _FLOW_FACTOR;
+    float const *_FLOW_FACTOR;
+    const uint _div = 3;
 
 public:
+    const uint PULSE_SAMPLES = 10;
     volatile uint Pulses = 0;
     float FlowRate = 0; // flow rate in lph TODO maybe change to uint
-    double cummulativeFlow = 0;
+    // double cummulativeFlow = 0;
     uint volumePulses;
     ulong Volume = 0;
-    PulseMeter(uint8_t inputPin, const float Factor) : _FLOW_FACTOR(Factor) { _inputPin = inputPin; }
-    void CalculateFlow();
+    uint time_for_pulses_ms = 0;
+    PulseMeter(uint8_t inputPin, float *Factor) : _FLOW_FACTOR(Factor), _inputPin(inputPin) {};
+    // void ChangeFactor(float Factor) { _FLOW_FACTOR = Factor; }
+    void CalculateFlow(bool calcVolume = false);
+    void CalculateFlowNew(bool calcVolume = false); // TODO add something for volume here
+    void StoreTime(void)                            // TODO add something for volume here
+    {
+        time_for_pulses_ms = millis() - _pulseTimeStamp;
+        _pulseTimeStamp = millis();
+        Pulses = 0;
+    }
 };
 
 class DigitalInput
@@ -172,7 +187,7 @@ private:
     uint _inputPin;
     // const uint _readingPeriod = 550;    // minimum time between readings [ms]
     uint _readingPeriod;
-    ulong _timeStamp;
+    ulong _timeStamp = 0;
     DeviceAddress _deviceAddress;
 
 public:

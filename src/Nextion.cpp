@@ -8,14 +8,16 @@ Icon I_WIFI(I_ICON, '0', WifiPics);
 // Main page
 Icon I_RO_PUMP(I_PUMP, '1', PumpPics);
 Icon I_BOOSTER_PUMP(I_PUMP, '2', PumpPics);
+Icon I_FEED_PUMP(I_PUMP, '3', SmlButtonPics);
 
 Icon I_BW_VALVE(I_BW_HEAD, '1', FRP_Pics);
+
 Icon I_INLET_VALVE(I_VALVE, '1', ValvePics);
 Icon I_FLUSH_VALVE(I_VALVE, '2', ValvePics);
 
 Icon I_FEED_FLOAT(I_FLOAT, '0', FloatPics);
 
-Sensor I_FEED_PRESS(I_PRESSURE, '0', SensorBkgndPics, ONE_DECIMAL, INT_MIN, INT_MAX, INT_MIN, DEF_FP_FAULT);
+Sensor I_FEED_PRESS(I_PRESSURE, '0', SensorBkgndPics, ONE_DECIMAL, INT_MIN, INT_MAX, DEF_FP_FAULT, INT_MAX);
 Sensor I_HP_PRESS(I_PRESSURE, '1', SensorBkgndPics, ONE_DECIMAL, INT_MIN, INT_MAX, INT_MIN, DEF_HP_FAULT);
 Sensor I_POST_MEM_PRESS(I_PRESSURE, '2', SensorBkgndPics, ONE_DECIMAL);
 Sensor I_DELTA_PRESS(I_PRESSURE, '3', SensorBkgndPics, ONE_DECIMAL, INT_MIN, DEF_DP_WARNING, INT_MIN, DEF_DP_FAULT);
@@ -37,6 +39,21 @@ PumpValues PVAL_BOOSTER_PUMP(7, 8, 9, 10, 11);
 Value VAL_RECOVERY('x', 5, ONE_DECIMAL, DEF_REC_MIN, DEF_REC_MAX);
 Value VAL_PERM_VOL('x', 6, ONE_DECIMAL);
 
+Value VAL_CalibVoltage('c', 0, NO_DECIMAL);
+Value VAL_CalibCurrent('c', 1, NO_DECIMAL);
+Value VAL_CalibSmallPM('c', 2, ONE_DECIMAL);
+Value VAL_CalibLargePM('c', 3, TWO_DECIMAL);
+
+Value VAL_A0_Current('A', 0, ONE_DECIMAL);
+Value VAL_A1_Current('A', 1, ONE_DECIMAL);
+Value VAL_A2_Current('A', 2, ONE_DECIMAL);
+Value VAL_A3_Current('A', 3, ONE_DECIMAL);
+
+Value VAL_A0_Voltage('V', 0, ONE_DECIMAL);
+Value VAL_A1_Voltage('V', 1, ONE_DECIMAL);
+Value VAL_A2_Voltage('V', 2, ONE_DECIMAL);
+Value VAL_A3_Voltage('V', 3, ONE_DECIMAL);
+
 void Nextion::CommsHandler(void)
 {
     switch (header)
@@ -48,9 +65,8 @@ void Nextion::CommsHandler(void)
     case H_USER_BUTTON: //  'u'
         if (currPage == P_MAIN)
         {
-            B_USER_ON_OFF.on_off = data[0];
+            UpdateUserButton(data[0]);
             cbNextion(header, true, data[0]);
-            SendButtonPicVal(B_USER_ON_OFF);
         }
         else
             debugln("errorUserBtn");
@@ -63,7 +79,7 @@ void Nextion::CommsHandler(void)
             if (data[0] == 'm') // if a pump motor
             {
                 id = 10 + data[1] - '0';
-                on_off = (data[2] == PumpPics[0] ? true : false);
+                // on_off = (data[2] == PumpPics[0] ? true : false);
             }
             else // it's a valve
             {
@@ -101,8 +117,8 @@ void Nextion::CommsHandler(void)
     case H_PRESS_SET:               // 0xb4 --
         cbNextion(header, 0, true); // pressures indexes 0,2,4,6
         break;
-    case H_SYSTEM_SET: // 0xb5 -- changed these to stay on the nextion (currently just sleep -- 10-05-24)
-        break;
+    // case H_SYSTEM_SET: // 0xb5 -- changed these to stay on the nextion (currently just sleep -- 10-05-24)
+    //     break;
     case H_WARNING:
         if (data[0] == 'c')
             ClearWarnings();
@@ -110,12 +126,15 @@ void Nextion::CommsHandler(void)
             NextWarning(data[0] == '+');
         // cbNextion(header, data[0], true); // can be clear, next warning or previous warning
         break;
-    case H_RTC:
-        // RTC_Handler(data[0]);
-        break;
+    // case H_RTC:
+    //     // RTC_Handler(data[0]);
+    //     break;
     case H_RESET:
         cbNextion(header, true, true);
         ChangePage(currPage);
+        break;
+    case H_CALIBRATION:
+        cbNextion(header, data[0], (data[1] == '+'));
         break;
     default:
         debugln("Header error");
@@ -136,6 +155,7 @@ bool Nextion::ChangeIfPageExists(char page)
     case P_POPUP:
     case P_SLEEP:
     case P_GLOBAL:
+    case P_CALIBRATE:
         currPage = (Page_t)page;
         break;
     default:
@@ -215,6 +235,11 @@ void Nextion::ChangePage(uint next_page)
     Comms.print("page "); // Comms.print(F("page "));
     Comms.print(next_page - 0xa0);
     _endTrans();
+}
+void Nextion::UpdateUserButton(bool newStatus)
+{
+    B_USER_ON_OFF.on_off = newStatus;
+    SendButtonPicVal(B_USER_ON_OFF);
 }
 void Nextion::Startup(void) // Display Setup
 {
@@ -357,15 +382,21 @@ void Nextion::SendSensorValue(Sensor &sensor, bool SkipPrecheck)
 }
 void Nextion::SendSensorStatus(Sensor &sensor, bool SkipPrecheck)
 {
-    if (SkipPrecheck || sensor.lastFaultStatus != sensor.fault)
+    char sensorID[3] = {sensor.type, sensor.number, 0};
+    if (SkipPrecheck)
     {
-        char sensorID[3] = {sensor.type, sensor.number, 0};
+        if (sensor.fault)
+            ChangeCropPic(sensorID, sensor.pic[(uint)sensor.fault * 2]);
+        else
+            ChangeCropPic(sensorID, sensor.pic[sensor.alarm]);
+    }
+    else if (sensor.lastFaultStatus != sensor.fault)
+    {
         ChangeCropPic(sensorID, sensor.pic[(uint)sensor.fault * 2]);
         sensor.lastFaultStatus = sensor.fault;
     }
-    else if (SkipPrecheck || sensor.lastStatus != sensor.alarm)
+    else if (sensor.lastStatus != sensor.alarm)
     {
-        char sensorID[3] = {sensor.type, sensor.number, 0};
         ChangeCropPic(sensorID, sensor.pic[sensor.alarm]);
         sensor.lastStatus = sensor.alarm;
     }
@@ -516,7 +547,7 @@ void Nextion::SendPumpFault(uint fault, Icon &PumpIcon)
         char tempStr[6] = {0};
         if (fault)
             snprintf(tempStr, sizeof(tempStr), "F-%u", fault);
-        char TempPumpStr[4] =  {'m', PumpIcon.number, 'F',0};
+        char TempPumpStr[4] = {'m', PumpIcon.number, 'F', 0};
         SendGlobalStr(TempPumpStr, tempStr);
         PumpIcon.lastSentPumpFault = fault;
     }
@@ -703,6 +734,7 @@ void Nextion::PrintPage(bool firstEntry) // set firstEntry to true for setup of 
         SendIconStatus(I_FLUSH_VALVE, firstEntry);
 
         SendIconStatus(I_RO_PUMP, firstEntry);
+        SendIconStatus(I_FEED_PUMP, firstEntry);
 
         SendSensorValueStatus(I_FEED_PRESS, firstEntry);
         SendSensorValueStatus(I_HP_PRESS, firstEntry);
@@ -717,6 +749,26 @@ void Nextion::PrintPage(bool firstEntry) // set firstEntry to true for setup of 
         SendSensorValueStatus(I_EC_PERM, firstEntry);
 
         SendSensorValueStatus(I_RECOVERY, firstEntry);
+        break;
+    case P_CALIBRATE:
+        SendValue(VAL_CalibVoltage, firstEntry);
+        SendValue(VAL_CalibCurrent, firstEntry);
+        SendValue(VAL_CalibSmallPM, firstEntry);
+        SendValue(VAL_CalibLargePM, firstEntry);
+
+        SendValue(VAL_A0_Voltage, firstEntry);
+        SendValue(VAL_A1_Voltage, firstEntry);
+        SendValue(VAL_A2_Voltage, firstEntry);
+        SendValue(VAL_A3_Voltage, firstEntry);
+
+        SendValue(VAL_A0_Current, firstEntry);
+        SendValue(VAL_A1_Current, firstEntry);
+        SendValue(VAL_A2_Current, firstEntry);
+        SendValue(VAL_A3_Current, firstEntry);
+
+        SendSensorValueStatus(I_PERM_FLOW, firstEntry);
+        SendSensorValueStatus(I_RECYCLE_FLOW, firstEntry);
+        SendSensorValueStatus(I_BRINE_FLOW, firstEntry);
         break;
     case P_NONE:
     case P_POPUP:
@@ -775,15 +827,18 @@ void Nextion::ConvertToHMI_TankLevel(float val, TankBar &tank, bool alarm)
 
 void Nextion::UpdateCountdown(uint seconds)
 {
-    Comms.print("Secs.txt=\" - ");
-    if (seconds >= 60)
+    if (currPage == P_MAIN)
     {
-        Comms.print(seconds / 60);
-        Comms.print("min");
+        Comms.print("Secs.txt=\" - ");
+        if (seconds >= 60)
+        {
+            Comms.print(seconds / 60);
+            Comms.print("min");
+        }
+        Comms.print(seconds % 60);
+        Comms.print("s\"");
+        _endTrans();
     }
-    Comms.print(seconds % 60);
-    Comms.print("s\"");
-    _endTrans();
 }
 void Nextion::RemoveCountdown(void)
 {

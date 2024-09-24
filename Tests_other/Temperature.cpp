@@ -1,12 +1,13 @@
-#define BLYNK_FIRMWARE_VERSION "0.1.0"
-#define BLYNK_TEMPLATE_ID "TMPL2E91bPiCL"
-#define BLYNK_TEMPLATE_NAME "RO"
+// #define BLYNK_FIRMWARE_VERSION "0.1.0"
+// #define BLYNK_TEMPLATE_ID "TMPL2E91bPiCL"
+// #define BLYNK_TEMPLATE_NAME "RO"
 
-#include <unity.h>
-#include <BlynkEdgent.h>
-#include "Definitions.h"
-#include "Nextion.h"
+// #include <unity.h>
+// #include <BlynkEdgent.h>
+#include "OB_Define.h"
+// #include "Nextion.h"
 
+TempSensor TestTemp;
 
 void setup()
 {
@@ -14,7 +15,7 @@ void setup()
     Serial.begin(115200);
     Serial.println("starting");
     delay(500);
-    TestTemp.Begin();
+    // TestTemp.Begin();
 }
 
 void loop()

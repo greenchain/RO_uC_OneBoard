@@ -14,20 +14,36 @@
  * - edited the clear warnings callback to change vis of certain components
  * - moved Blynk calls to reduce wifi noise
  * - removed bypass from RO sate maching and only opens when tank is low and closes when >100% OR in service and >25%
- * - added warning for low feed tank
+ * - added warning for low ` tank
  * v1.0.3
  * - changed flush timers to seconds for better control
  */
 
 #include "Definitions.h"
-// #include <nvs_flash.h>
+#include <nvs_flash.h>
 
 /* General Functions */
 void InterruptSetup(void);
-void IRAM_ATTR permeatePulse(void) { PermeatePM.Pulses++; }
-void IRAM_ATTR brinePulse(void) { BrinePM.Pulses++; }
-void IRAM_ATTR recyclePulse(void) { RecyclePM.Pulses++; }
+void IRAM_ATTR permeatePulse(void)
+{
+  PermeatePM.Pulses++;
+  if (PermeatePM.Pulses == PermeatePM.PULSE_SAMPLES)
+    PermeatePM.StoreTime();
+}
+void IRAM_ATTR brinePulse(void)
+{
+  BrinePM.Pulses++;
+  if (BrinePM.Pulses == BrinePM.PULSE_SAMPLES)
+    BrinePM.StoreTime();
+}
+void IRAM_ATTR recyclePulse(void)
+{
+  RecyclePM.Pulses++;
+  if (RecyclePM.Pulses == RecyclePM.PULSE_SAMPLES)
+    RecyclePM.StoreTime();
+}
 
+SemaphoreHandle_t xSemaphore = NULL; // Create a semaphore object
 TaskHandle_t BlynkTH;
 bool analog_flag;
 
@@ -54,6 +70,8 @@ void setup()
 
   TimerSetup();
   InterruptSetup();
+
+  xSemaphore = xSemaphoreCreateBinary(); // Set the semaphore as binary
   // disableCore1WDT();
   xTaskCreatePinnedToCore(BlynkLoop, "Blynk", 10000, NULL, 1, &BlynkTH, 1);
 }
@@ -61,14 +79,7 @@ void setup()
 //********************** MAIN **********************
 void loop()
 {
-  HPP_VSD.RunModbus();
-  BOOST_VSD.RunModbus();
-  // RunAnalog(ADC_1); //TODO change this to a method in OB class once ADC class created
-  while (Comms.available()) // listen if there are items on serial
-  {
-    HMI.Listen();
-  }
-  vTaskDelay(1 / portTICK_PERIOD_MS);
+  RunCoreFunctions();
 }
 
 //********************** FUNTIONS **********************
