@@ -88,11 +88,10 @@ void ModbusVSD::RunModbus(void)
                             else
                                 PumpState = PumpStop;
                         }
-                        else if (State == 2)
+                        else //if (State == 3)
                         {
                             PumpState = PumpFault;
                         }
-
                         MBstate = MB_ReadValues;
                     }
                     Running = (PumpState == PumpRun);

@@ -73,7 +73,7 @@ void setup()
 
   xSemaphore = xSemaphoreCreateBinary(); // Set the semaphore as binary
   // disableCore1WDT();
-  xTaskCreatePinnedToCore(BlynkLoop, "Blynk", 10000, NULL, 1, &BlynkTH, 1);
+  xTaskCreatePinnedToCore(BlynkLoop, "Blynk", 8192 /* 8 kbytes */, NULL, 1, &BlynkTH, 1);
 }
 
 //********************** MAIN **********************
