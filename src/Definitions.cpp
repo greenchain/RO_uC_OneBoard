@@ -1106,6 +1106,7 @@ void StateMachineRO::ChangeState(state_t nextState)
         case ST_TANK_FULL:
             break;
         case ST_PREFILTER:
+            WriteOutput(FEED_START_STOP, true);
             break;
         case ST_VSD_FAULT:
             HMI.AddFault(VSD_Fault);

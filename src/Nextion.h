@@ -323,22 +323,25 @@ struct Button
     }
 };
 
+#define LOG_STRING_TIME_LENGTH 20
+#define LOG_STRING_WARNING_LENGTH 40
+#define WARNING_MAX_TEXT_LENGTH 60
 class Warnings
 {
-    static const uint txt_maxl = 40;
+        char TimeStamp[LOG_STRING_TIME_LENGTH] = LOG_STRING;
+    char WarningString[LOG_STRING_WARNING_LENGTH];
+
     const char noneStr[1] = "";
     const char highStr[6] = "High ";
     const char lowStr[6] = "Low ";
     InputTimer Timer;
     uint TimerDelay_ms;
     const char *PreStr = noneStr;
-    char TimeStamp[16] = LOG_STRING;
-    char WarningString[25];
 
 public:
-    char OutputStr[txt_maxl + 1];
+    char OutputStr[WARNING_MAX_TEXT_LENGTH + 1];
     bool WarningLogged = false;
-    Warnings(const char *string, uint delay_s) : TimerDelay_ms(delay_s * 1000) { snprintf(WarningString, 25, "%s", string); }
+    Warnings(const char *string, uint delay_s) : TimerDelay_ms(delay_s * 1000) { snprintf(WarningString, LOG_STRING_WARNING_LENGTH, "%s", string); }
     bool isLogged(void) { return WarningLogged; }
     bool CheckIfWarningTriggered(bool input)
     {
@@ -361,11 +364,11 @@ public:
         setType(WarnType);
         if (ezt::timeStatus() == timeSet)
         {
-            snprintf(TimeStamp, sizeof(TimeStamp), local.dateTime(LOG_STRING).c_str());
-            snprintf(OutputStr, txt_maxl, "%s%s \\r[%s]", PreStr, WarningString, TimeStamp);
+            snprintf(TimeStamp, LOG_STRING_TIME_LENGTH, local.dateTime(LOG_STRING).c_str());
+            snprintf(OutputStr, WARNING_MAX_TEXT_LENGTH, "%s%s \\r[%s]", PreStr, WarningString, TimeStamp);
         }
         else
-            snprintf(OutputStr, txt_maxl, "%s%s", PreStr, WarningString);
+            snprintf(OutputStr, WARNING_MAX_TEXT_LENGTH, "%s%s", PreStr, WarningString);
     }
     char *getOutputStr() { return &OutputStr[0]; }
     void ResetTimer(void)
