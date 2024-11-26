@@ -10,7 +10,6 @@
 
 #include <BlynkEdgent.h>
 #include "Definitions.h"
-#include "Nex_Ultra.h"
 
 #define DEBUG 0
 

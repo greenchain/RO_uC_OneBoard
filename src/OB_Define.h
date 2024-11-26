@@ -124,7 +124,6 @@ private:
     ulong _timeStamp = 0;
     ulong _pulseTimeStamp = 0;
     uint _pulsePerLitre = 288;
-    // TODO below may need to be calibrated per size 4.8 is the calibration for small meter (1/2 inch)
     float const *_FLOW_FACTOR;
     const uint _div = 3;
 

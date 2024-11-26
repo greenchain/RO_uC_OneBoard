@@ -12,14 +12,19 @@
 #define NumADC_samples 40
 
 /*Constants FOR RO CONTROLLER*/
-#define SENSOR_MIN_EC 0.0F
+#define SENSOR_MIN_0 0.0F
+
 #define SENSOR_MAX_EC 2000.0F
 
-#define SENSOR_MIN_FP 0.0F
-#define SENSOR_MAX_FP 10.0F
+#define P_10_BAR 10.0F
+#define P_16_BAR 16.0F
+#define P_25_BAR 25.0F
 
-#define SENSOR_MIN_HP 0.0F
-#define SENSOR_MAX_HP 10.0F // TODO 25.0F for dinaka
+#define P_SENSOR_MAX_FeedP P_10_BAR
+#define P_SENSOR_MAX_HPin P_10_BAR
+#define P_SENSOR_MAX_PreMP P_10_BAR
+#define P_SENSOR_MAX_PostMP P_10_BAR
+#define P_SENSOR_MAX_Boost P_10_BAR
 
 #define VSD_V_FACTOR 100
 
@@ -65,7 +70,7 @@ enum state_t
     ST_PROD_FLOW_FAULT = 11,
     ST_BRINE_FLOW_FAULT = 12,
     ST_EC_FAULT = 13,
-    ST_FEED_P_FAULT = 14,
+    ST_HPP_INLET_P_FAULT = 14,
     ST_MANUAL = 15
 };
 const char stateStr[][30] = {
@@ -118,8 +123,10 @@ extern DigitalInput BackwashRelay;
 extern DigitalInput FaultRelay;
 
 extern TempSensor AmbientTemp;
+
 extern ModbusVSD HPP_VSD;
 extern ModbusVSD BOOST_VSD;
+extern ModbusVSD FP_VSD;
 
 extern Button B_USER_ON_OFF;
 extern Icon I_WIFI;
@@ -134,8 +141,9 @@ extern Icon I_INLET_VALVE;
 extern Icon I_FLUSH_VALVE;
 extern Icon I_FEED_FLOAT;
 
-extern Sensor I_FEED_PRESS;
-extern Sensor I_HP_PRESS;
+extern Sensor I_FEED_PUMP_PRESS;
+extern Sensor I_HP_INLET_PRESS;
+extern Sensor I_HP_OUTLET_PRESS;
 extern Sensor I_POST_MEM_PRESS;
 extern Sensor I_DELTA_PRESS;
 extern Sensor I_BOOSTER_PRESS;
@@ -180,10 +188,12 @@ void RunCoreFunctions(void);
 
 bool cbHPP_ReadHreg(Modbus::ResultCode event, uint16_t transactionId, void *data);
 bool cbBoosterReadHreg(Modbus::ResultCode event, uint16_t transactionId, void *data);
+bool cbFeedReadHreg(Modbus::ResultCode event, uint16_t transactionId, void *data);
 void PumpStatusHandler(ModbusVSD &PumpVSD, Icon &I_PumpStatus, PumpValues &VAL_PumpValues, float &Analog1, float &Analog2); //, int BlynkPin);
+
 void CheckSensors(void);
 void CheckInputs(void);
-void CheckFlowMeters(void);
+void CheckPulseMeters(void);
 void StartService(void);
 void StartFlush(void);
 // void StartBypass(void);
@@ -236,8 +246,9 @@ private:
     const char mPwdP_k[4] = "wdP"; // Warning differential pressure across the membrane
     const char mPfdP_k[4] = "fdP"; // maximum differential pressure across the membrane
     /* Logs */
-    const char pMin_k[4] = "Pmn"; // total mins that the pump has run
+    const char HpMn_k[4] = "HPm"; // total mins that the pump has run
     const char BpMn_k[4] = "BPm"; // total mins that the booster pump has run
+    const char FpMn_k[4] = "FPm"; // total mins that the booster pump has run
     const char volF_k[4] = "vlF"; //
     const char volP_k[4] = "vlP"; //
 
@@ -265,6 +276,7 @@ public:
     uint LastSavedRO_PumpMins = 0;
     uint LastSavedBoostPumpMins = 0;
     uint LastSavedPermVol = 0;
+    uint LastSavedFeedPumpMins =0;
 
     //  Functions for saving/retrieving saved variables
     void FileSetup(void);
@@ -298,7 +310,7 @@ public:
     {
         if (pumpMins - LastSavedRO_PumpMins > MIN_BETWEEN_SAVE)
         {
-            settings.putUInt(pMin_k, pumpMins);
+            settings.putUInt(HpMn_k, pumpMins);
             LastSavedRO_PumpMins = pumpMins;
         }
     }
@@ -308,6 +320,14 @@ public:
         {
             settings.putUInt(BpMn_k, pumpMins);
             LastSavedBoostPumpMins = pumpMins;
+        }
+    }
+    void StoreFeedPumpMins(uint pumpMins) // check if there have been enough mins since last save and then save new value
+    {
+        if (pumpMins - LastSavedFeedPumpMins > MIN_BETWEEN_SAVE)
+        {
+            settings.putUInt(FpMn_k, pumpMins);
+            LastSavedRO_PumpMins = pumpMins;
         }
     }
     void StorePermVol(uint Volume)
@@ -358,14 +378,17 @@ public:
     /* ANALOG INPUTS */
     // float PH = SENSOR_MIN_PH;
     // float ORP = SENSOR_MIN_ORP;
-    float EC = SENSOR_MIN_EC;
-    float FeedPressure = 0.0;
+    float EC = SENSOR_MIN_0;
+    float HPP_InletPressure = SENSOR_MIN_0;    
+    float PostMemPressure = SENSOR_MIN_0;
+
+    /* CALCULATED */
+    float DeltaMemPressure = SENSOR_MIN_0;
 
     /* MODBUS INPUTS */
-    float HP_Pressure = 0.0;
-    float PostMemPressure = 0.0;
-    float DeltaMemPressure = 0.0;
-    float BoostPressure = 0.0;
+    float HP_PumpPressure = SENSOR_MIN_0;
+    float BoostPumpPressure = SENSOR_MIN_0;
+    float FeedPumpPressure = SENSOR_MIN_0;
 
     float FeedFlow = 0.0;
     float Recovery = 0.0;

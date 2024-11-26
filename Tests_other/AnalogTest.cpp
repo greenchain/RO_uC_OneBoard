@@ -33,7 +33,8 @@ extern bool AnalogSetup(ADS1115 &AnalogDC);
 //********************** SETUP **********************
 void setup()
 {
-  Serial.begin(115200, SERIAL_8N1, 44, 43);
+  // Serial.begin(115200, SERIAL_8N1, 44, 43);
+  Serial.begin(115200);
   delay(2000);
   UNITY_BEGIN();
   

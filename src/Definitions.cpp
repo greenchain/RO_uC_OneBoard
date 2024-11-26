@@ -28,8 +28,10 @@ DigitalInput BackwashRelay(BW_RELAY);
 DigitalInput FaultRelay(FAULT_IN);
 
 TempSensor AmbientTemp;
-ModbusVSD HPP_VSD(1, cbHPP_ReadHreg);
-ModbusVSD BOOST_VSD(2, cbBoosterReadHreg);
+
+ModbusVSD FP_VSD(1, cbFeedReadHreg);
+ModbusVSD HPP_VSD(2, cbHPP_ReadHreg); //ModbusVSD HPP_VSD(1, cbHPP_ReadHreg);
+ModbusVSD BOOST_VSD(3, cbBoosterReadHreg); // ModbusVSD BOOST_VSD(2, cbBoosterReadHreg);
 
 Warnings PermFlowWarning("Product Flow", MIN_IN_SEC);
 Warnings XFlowWarning("Recycle Flow", MIN_IN_SEC);
@@ -49,7 +51,7 @@ Warnings BrineFlowFault(stateStr[ST_BRINE_FLOW_FAULT], MIN_IN_SEC);
 
 Warnings EC_Fault(stateStr[ST_EC_FAULT], MIN_IN_SEC);
 
-Warnings FeedPressFault(stateStr[ST_FEED_P_FAULT], TEN_SEC);
+Warnings FeedPressFault(stateStr[ST_HPP_INLET_P_FAULT], TEN_SEC);
 Warnings MemPressFault(stateStr[ST_OVER_P_FAULT], TEN_SEC);
 Warnings dPressFault(stateStr[ST_D_P_FAULT], MIN_IN_SEC);
 
@@ -67,7 +69,7 @@ void RunCoreFunctions(void)
     {
         TenMillisecTimeStamp = thisMs;
         CheckInputs();
-        CheckFlowMeters();
+        CheckPulseMeters();
     }
     if (thisMs - HalfSecTimeStamp >= 500) // every 500ms
     {
@@ -81,6 +83,7 @@ void RunCoreFunctions(void)
         SM.RunStateMachine();
         UpdateHMI();
     }
+    FP_VSD.RunModbus();
     HPP_VSD.RunModbus();
     BOOST_VSD.RunModbus();
     if (analog_flag)
@@ -110,7 +113,7 @@ bool Check4to20(float &value)
 }
 void CheckSensors(void) // TODO
 {
-    static float Temp, Temp1, Temp2, Temp3, Temp4 = 0;
+    static float Temp1, Temp2, Temp3, Temp4 = 0;
     const uint AVERAGE_NUM = 5;
     const uint AVG_LESS1 = AVERAGE_NUM - 1;
     // Check all analog
@@ -120,21 +123,23 @@ void CheckSensors(void) // TODO
         // Temp1 = (float)ADC_1.readADC(0) / CurrentFactor;
         Temp1 = AnalogIn[0] / CurrentFactor;
         Check4to20(Temp1);
-        SM.EC = map_4to20(Temp1, SENSOR_MIN_EC, SENSOR_MAX_EC);
+        SM.EC = map_4to20(Temp1, SENSOR_MIN_0, SENSOR_MAX_EC);
         HMI.ConvertToHMI_SensorValue(SM.EC, I_EC_PERM, SM.state == ST_SERVICE);
 
         // // ANALOGUE 2
         Temp2 = AnalogIn[1] / CurrentFactor;
         Check4to20(Temp2);
-        SM.FeedPressure = map_4to20(Temp2, SENSOR_MIN_FP, SENSOR_MAX_FP);
-        HMI.ConvertToHMI_SensorValue(SM.FeedPressure, I_FEED_PRESS, SM.state == ST_SERVICE);
+        SM.HPP_InletPressure = map_4to20(Temp2, SENSOR_MIN_0, P_SENSOR_MAX_FeedP);
+        HMI.ConvertToHMI_SensorValue(SM.HPP_InletPressure, I_HP_INLET_PRESS, SM.state == ST_SERVICE);
 
         // // ANALOGUE 3
-        // Temp3 = AnalogIn[3] / CurrentFactor;
-        // Check4to20(Temp3);
+        Temp3 = AnalogIn[2] / CurrentFactor;
+        Check4to20(Temp2);
+        SM.PostMemPressure = map_4to20(Temp3, SENSOR_MIN_0, P_SENSOR_MAX_PostMP);
+        HMI.ConvertToHMI_SensorValue(SM.PostMemPressure, I_POST_MEM_PRESS, HPP_VSD.Running);
 
         // // ANALOGUE 4
-        // Temp4 = AnalogIn[4] / CurrentFactor;
+        // Temp4 = AnalogIn[3] / CurrentFactor;
         // Check4to20(Temp4);
 
         if (HMI.currPage == P_CALIBRATE)
@@ -151,34 +156,35 @@ void CheckSensors(void) // TODO
 
         readComplete = false;
     }
+    else
+        debugln("NO ADC");
 
-    // Check Pump values
     float TempVSD1 = 0, TempVSD2 = 0;
+    bool OutOf4to20_alarm = 0;
+    // Check Pump values
+    PumpStatusHandler(FP_VSD, I_FEED_PUMP, PVAL_RO_PUMP, TempVSD1, TempVSD2); //, B_RO_PUMP);
+    OutOf4to20_alarm = !Check4to20(TempVSD1);
+    SM.FeedPumpPressure = map_4to20(TempVSD1, SENSOR_MIN_0, P_SENSOR_MAX_FeedP); // map to pressure
+    HMI.ConvertToHMI_SensorValue(SM.FeedPumpPressure, I_FEED_PUMP_PRESS, FP_VSD.Running);
+
     PumpStatusHandler(HPP_VSD, I_RO_PUMP, PVAL_RO_PUMP, TempVSD1, TempVSD2); //, B_RO_PUMP);
-    bool OutOf4to20_alarm = !Check4to20(TempVSD1);
-    SM.HP_Pressure = map_4to20(TempVSD1, SENSOR_MIN_HP, SENSOR_MAX_HP); // map to pressure
-    HMI.ConvertToHMI_SensorValue(SM.HP_Pressure, I_HP_PRESS, HPP_VSD.Running);
-    // if (OutOf4to20_alarm)
-    //     I_HP_PRESS.alarm = true;
+    OutOf4to20_alarm = !Check4to20(TempVSD1);
+    SM.HP_PumpPressure = map_4to20(TempVSD1, SENSOR_MIN_0, P_SENSOR_MAX_PreMP); // map to pressure
+    HMI.ConvertToHMI_SensorValue(SM.HP_PumpPressure, I_HP_OUTLET_PRESS, HPP_VSD.Running);
+    // SM.PostMemPressure = map_4to20(TempVSD2, SENSOR_MIN_HP, SENSOR_MAX_HP);
+    // HMI.ConvertToHMI_SensorValue(SM.PostMemPressure, I_POST_MEM_PRESS, HPP_VSD.Running);
 
-    OutOf4to20_alarm = !Check4to20(TempVSD2);
-    SM.PostMemPressure = map_4to20(TempVSD2, SENSOR_MIN_HP, SENSOR_MAX_HP);
-    HMI.ConvertToHMI_SensorValue(SM.PostMemPressure, I_POST_MEM_PRESS, HPP_VSD.Running);
-    // if (OutOf4to20_alarm)
-    //     I_HP_PRESS.alarm = true;
-
-    SM.DeltaMemPressure = SM.HP_Pressure - SM.PostMemPressure;
+    SM.DeltaMemPressure = SM.HP_PumpPressure - SM.PostMemPressure;
     HMI.ConvertToHMI_SensorValue(SM.DeltaMemPressure, I_DELTA_PRESS, HPP_VSD.Running);
 
     PumpStatusHandler(BOOST_VSD, I_BOOSTER_PUMP, PVAL_BOOSTER_PUMP, TempVSD1, TempVSD2); //, B_BOOST_PUMP);
     OutOf4to20_alarm = !Check4to20(TempVSD1);
-    SM.BoostPressure = map_4to20(TempVSD1, SENSOR_MIN_FP, SENSOR_MAX_FP);
-    HMI.ConvertToHMI_SensorValue(SM.BoostPressure, I_BOOSTER_PRESS, false);
-    // if (OutOf4to20_alarm || BOOST_VSD.PumpState == ModbusVSD::PumpDisconnect)
-    //     I_BOOSTER_PRESS.alarm = true;
+    SM.BoostPumpPressure = map_4to20(TempVSD1, SENSOR_MIN_0, P_SENSOR_MAX_Boost);
+    HMI.ConvertToHMI_SensorValue(SM.BoostPumpPressure, I_BOOSTER_PRESS, false);
 
     SET.StoreRO_PumpMins(HPP_VSD.pumpMin);
     SET.StoreBoostPumpMins(BOOST_VSD.pumpMin);
+    SET.StoreFeedPumpMins(FP_VSD.pumpMin);
 
     // Calculate all inputs with flows
     if (PermeateVM.CheckVolumeMeter(false))
@@ -292,7 +298,7 @@ void CheckInputs(void)
     SM.faultRelay_flag = FaultRelay.ReadInputDebounce(HUNDREDTH_SEC);
     // SM.faultRelayFault = FaultRelay.ReadInputDelay(SEC * 10, SM.faultRelay_flag);
 }
-void CheckFlowMeters(void)
+void CheckPulseMeters(void)
 {
     PermeatePM.CalculateFlowNew();
     HMI.ConvertToHMI_SensorValue(PermeatePM.FlowRate, I_PERM_FLOW, SM.state == ST_SERVICE);
@@ -512,15 +518,15 @@ bool cbNextionListen(char type, char ID, bool on_off)
     {
         String tempStr = "Pressures -";
         // Blynk.logEvent(BL_SETTINGS, "Pressures: " + String(HMI.data, HEX).substring(0, 5));
-        if (I_FEED_PRESS.setMinMax(joinLsbMsb(HMI.data[ID], HMI.data[ID + 1]), Sensor::FaultMin))
+        if (I_HP_INLET_PRESS.setMinMax(joinLsbMsb(HMI.data[ID], HMI.data[ID + 1]), Sensor::FaultMin))
         {
-            SET.StoreMinFeedPressure(I_FEED_PRESS.minFaultVal);
-            tempStr += ("Feed Pressure Fault: " + String((float)I_FEED_PRESS.minFaultVal / 10, 1) + " bar");
+            SET.StoreMinFeedPressure(I_HP_INLET_PRESS.minFaultVal);
+            tempStr += ("Feed Pressure Fault: " + String((float)I_HP_INLET_PRESS.minFaultVal / 10, 1) + " bar");
         }
-        if (I_HP_PRESS.setMinMax(joinLsbMsb(HMI.data[ID + 2], HMI.data[ID + 3]), Sensor::FaultMax))
+        if (I_HP_OUTLET_PRESS.setMinMax(joinLsbMsb(HMI.data[ID + 2], HMI.data[ID + 3]), Sensor::FaultMax))
         {
-            SET.StoreMaxMemPressure(I_HP_PRESS.maxFaultVal);
-            tempStr += ("HPP Pressure Fault: " + String((float)I_HP_PRESS.maxFaultVal / 10, 1) + " bar");
+            SET.StoreMaxMemPressure(I_HP_OUTLET_PRESS.maxFaultVal);
+            tempStr += ("HPP Pressure Fault: " + String((float)I_HP_OUTLET_PRESS.maxFaultVal / 10, 1) + " bar");
         }
         if (I_DELTA_PRESS.setMinMax(joinLsbMsb(HMI.data[ID + 4], HMI.data[ID + 5]), Sensor::AlarmMax))
         {
@@ -572,7 +578,7 @@ void ResetFaults(void)
         SM.faultRelayFault = false;
         WriteOutput(WARNING_LIGHT, false);
     }
-    if (SM.overPressFault && !I_HP_PRESS.fault)
+    if (SM.overPressFault && !I_HP_OUTLET_PRESS.fault)
     {
         // MemPressFault.ClearLog(); // rearm the fault
         SM.overPressFault = false;
@@ -630,8 +636,8 @@ void SendHMI_SettingValues(void)
     HMI.SendSetting("n30", SM.StartFlushTimeSecs);
     HMI.SendSetting("n31", SM.StopFlushTimeSecs);
 
-    HMI.SendSetting("n40", I_FEED_PRESS.minFaultVal);
-    HMI.SendSetting("n41", I_HP_PRESS.maxFaultVal);
+    HMI.SendSetting("n40", I_HP_INLET_PRESS.minFaultVal);
+    HMI.SendSetting("n41", I_HP_OUTLET_PRESS.maxFaultVal);
     HMI.SendSetting("n42", I_DELTA_PRESS.maxAlarmVal);
     HMI.SendSetting("n43", I_DELTA_PRESS.maxFaultVal);
     // PVAL_RO_PUMP.frequency.maxVal = 500;
@@ -660,7 +666,7 @@ void ManualModeButton(uint button, bool on_off)
         break;
     case 13:
         WriteOutput(FEED_START_STOP, !OutputStatus[FEED_START_STOP]); // Get current status of the output and toggle
-        I_FEED_PUMP.ChangeStatus((Status_t)OutputStatus[FEED_START_STOP]);
+        // I_FEED_PUMP.ChangeStatus((Status_t)OutputStatus[FEED_START_STOP]);
         break;
     default:
         debugln("mnlButErr");
@@ -781,6 +787,7 @@ void Save::initialise(void)
 
     StoreRO_PumpMins(HPP_VSD.pumpMin);
     StoreBoostPumpMins(BOOST_VSD.pumpMin);
+    StoreFeedPumpMins(FP_VSD.pumpMin);
     StorePermVol(PermeateVM.Volume_L);
 
     StoreVoltageFactor(VoltageFactor);
@@ -813,13 +820,16 @@ void Save::getAllSettings(void) // get all saved settings
     SM.StartFlushTimeSecs = getUshortIfExist(start_k, DEF_FLUSH_TIME);
     SM.StopFlushTimeSecs = getUshortIfExist(stopf_k, DEF_FLUSH_TIME);
 
-    I_FEED_PRESS.minFaultVal = getUshortIfExist(mP_fI_k, DEF_FP_FAULT);
-    I_HP_PRESS.maxFaultVal = getUshortIfExist(mP_MI_k, DEF_HP_FAULT);
+    I_HP_INLET_PRESS.minFaultVal = getUshortIfExist(mP_fI_k, DEF_FP_FAULT);
+    I_HP_OUTLET_PRESS.maxFaultVal = getUshortIfExist(mP_MI_k, DEF_HP_FAULT);
     I_DELTA_PRESS.maxAlarmVal = getUshortIfExist(mPwdP_k, DEF_DP_WARNING);
     I_DELTA_PRESS.maxFaultVal = getUshortIfExist(mPfdP_k, DEF_DP_FAULT);
 
-    HPP_VSD.pumpMin = getUIntIfExist(pMin_k, 0);
+    HPP_VSD.pumpMin = getUIntIfExist(HpMn_k, 0);
+    BOOST_VSD.pumpMin = getUIntIfExist(BpMn_k, 0);
+    FP_VSD.pumpMin = getUIntIfExist(FpMn_k, 0);
     PermeateVM.Volume_L = getUIntIfExist(volP_k, 0);
+
     getCalibrationSettings();
     debugln("Free Entries: " + String(freeEntries(), DEC));
 }
@@ -971,7 +981,7 @@ void StateMachineRO::RunStateMachine(void)
         if (!EC_MaxFault || !runButton)
             ChangeState(ST_STOPPED);
         break;
-    case ST_FEED_P_FAULT:
+    case ST_HPP_INLET_P_FAULT:
         if (!feedPressFault || !runButton)
             ChangeState(ST_STOPPED);
         break;
@@ -1059,12 +1069,12 @@ void StateMachineRO::CheckWarningsFaults(void)
         HMI.AddFault(EC_Fault, W_None);
         EC_MaxFault = true;
     }
-    if (FeedPressFault.CheckIfWarningTriggered(I_FEED_PRESS.fault))
+    if (FeedPressFault.CheckIfWarningTriggered(I_HP_INLET_PRESS.fault))
     {
         HMI.AddFault(FeedPressFault, W_Low);
         feedPressFault = true;
     }
-    if (MemPressFault.CheckIfWarningTriggered(I_HP_PRESS.fault))
+    if (MemPressFault.CheckIfWarningTriggered(I_HP_OUTLET_PRESS.fault))
     {
         overPressFault = true;
     }
@@ -1079,6 +1089,7 @@ void StateMachineRO::CheckWarningsFaults(void)
 }
 void StateMachineRO::ChangeState(state_t nextState)
 {
+    logBlynkStateChange = true;
     state = nextState;
     SecNow = 0;
     HMI.RemoveCountdown();
@@ -1144,7 +1155,7 @@ void StateMachineRO::ChangeState(state_t nextState)
             HMI.AddFault(EC_Fault);
             WriteOutput(WARNING_LIGHT, HIGH);
             break;
-        case ST_FEED_P_FAULT:
+        case ST_HPP_INLET_P_FAULT:
             HMI.AddFault(FeedPressFault);
             WriteOutput(WARNING_LIGHT, HIGH);
             break;
@@ -1231,7 +1242,7 @@ void StateMachineRO::InServiceChecks(void)
     else if (EC_MaxFault)
         stateAfterFlush = ST_EC_FAULT;
     else if (feedPressFault)
-        stateAfterFlush = ST_FEED_P_FAULT;
+        stateAfterFlush = ST_HPP_INLET_P_FAULT;
 
     if (stateAfterFlush != ST_STOP_FLUSH)
         ChangeState(ST_STOP_FLUSH);
@@ -1277,6 +1288,27 @@ bool cbBoosterReadHreg(Modbus::ResultCode event, uint16_t transactionId, void *d
     else if (BOOST_VSD.PumpState == ModbusVSD::PumpDisconnect)
     {
         BOOST_VSD.PumpState = ModbusVSD::PumpStop;
+    }
+    // debugln("MB_callback");
+    // debugln();
+    return true;
+}
+bool cbFeedReadHreg(Modbus::ResultCode event, uint16_t transactionId, void *data)
+{ // Callback from Modbus to monitor errors
+    if (event != Modbus::EX_SUCCESS)
+    {
+        // debug("Request result: 0x");
+        // debugBase(event, HEX);
+        // debug("\tMB state: ");
+        // debugln(BOOST_VSD.MBstate);
+
+        FP_VSD.PumpState = ModbusVSD::PumpDisconnect;
+        FP_VSD.IncrementVSD_Index();
+        // EM_VSD.MBstate = ModbusVSD::MB_Idle;
+    }
+    else if (FP_VSD.PumpState == ModbusVSD::PumpDisconnect)
+    {
+        FP_VSD.PumpState = ModbusVSD::PumpStop;
     }
     // debugln("MB_callback");
     // debugln();

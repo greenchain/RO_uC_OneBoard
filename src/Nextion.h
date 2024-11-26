@@ -36,7 +36,8 @@
 const uint8_t SensorBkgndPics[5] = {1, 2, 2, 2, 2}; // background (picc)
 const uint8_t ValvePics[5] = {11, 12, 12, 12, 12};  // Off, On
 const uint8_t FRP_Pics[5] = {13, 14, 14, 14, 14};   // Off, On
-const uint8_t PumpPics[5] = {15, 16, 17, 18, 18};   // Off, On, Fault, Warning/disconnect(orange)
+const uint8_t LrgPumpPics[5] = {15, 16, 17, 18, 18};   // Off, On, Fault, Warning/disconnect(orange)
+const uint8_t SmlPumpPics[5] = {34, 35, 36, 37, 37};   // Off, On, Fault, Warning/disconnect(orange)
 const uint8_t SmlButtonPics[5] = {22, 23, 22, 22, 22};
 // const uint8_t DosingPics[5] = {19, 20, 21, 22, 22};
 const uint8_t FloatPics[5] = {20, 21, 20, 20, 20};

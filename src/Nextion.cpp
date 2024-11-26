@@ -6,9 +6,10 @@ Button B_USER_ON_OFF(Button_Off, Button_On);
 Icon I_WIFI(I_ICON, '0', WifiPics);
 
 // Main page
-Icon I_RO_PUMP(I_PUMP, '1', PumpPics);
-Icon I_BOOSTER_PUMP(I_PUMP, '2', PumpPics);
-Icon I_FEED_PUMP(I_PUMP, '3', SmlButtonPics);
+Icon I_RO_PUMP(I_PUMP, '1', LrgPumpPics);
+Icon I_BOOSTER_PUMP(I_PUMP, '2', LrgPumpPics);
+Icon I_FEED_PUMP(I_PUMP, '3', SmlPumpPics);
+// Icon I_FEED_PUMP(I_PUMP, '3', SmlButtonPics);
 
 Icon I_BW_VALVE(I_BW_HEAD, '1', FRP_Pics);
 
@@ -17,8 +18,9 @@ Icon I_FLUSH_VALVE(I_VALVE, '2', ValvePics);
 
 Icon I_FEED_FLOAT(I_FLOAT, '0', FloatPics);
 
-Sensor I_FEED_PRESS(I_PRESSURE, '0', SensorBkgndPics, ONE_DECIMAL, INT_MIN, INT_MAX, DEF_FP_FAULT, INT_MAX);
-Sensor I_HP_PRESS(I_PRESSURE, '1', SensorBkgndPics, ONE_DECIMAL, INT_MIN, INT_MAX, INT_MIN, DEF_HP_FAULT);
+Sensor I_FEED_PUMP_PRESS(I_PRESSURE, '5', SensorBkgndPics, ONE_DECIMAL, INT_MIN, INT_MAX, DEF_FP_FAULT, INT_MAX);
+Sensor I_HP_INLET_PRESS(I_PRESSURE, '0', SensorBkgndPics, ONE_DECIMAL, INT_MIN, INT_MAX, DEF_FP_FAULT, INT_MAX);
+Sensor I_HP_OUTLET_PRESS(I_PRESSURE, '1', SensorBkgndPics, ONE_DECIMAL, INT_MIN, INT_MAX, INT_MIN, DEF_HP_FAULT);
 Sensor I_POST_MEM_PRESS(I_PRESSURE, '2', SensorBkgndPics, ONE_DECIMAL);
 Sensor I_DELTA_PRESS(I_PRESSURE, '3', SensorBkgndPics, ONE_DECIMAL, INT_MIN, DEF_DP_WARNING, INT_MIN, DEF_DP_FAULT);
 Sensor I_BOOSTER_PRESS(I_PRESSURE, '4', SensorBkgndPics);
@@ -668,10 +670,11 @@ void Nextion::PrintPage(bool firstEntry) // set firstEntry to true for setup of 
 
         SendIconStatus(I_RO_PUMP, firstEntry);
 
-        SendSensorValueStatus(I_FEED_PRESS, firstEntry);
-        SendSensorValueStatus(I_HP_PRESS, firstEntry);
-        SendSensorValueStatus(I_POST_MEM_PRESS, firstEntry);
-        SendSensorValueStatus(I_DELTA_PRESS, firstEntry);
+        SendSensorValue(I_FEED_PUMP_PRESS, firstEntry);
+        SendSensorValue(I_HP_INLET_PRESS, firstEntry);
+        SendSensorValue(I_HP_OUTLET_PRESS, firstEntry);
+        SendSensorValue(I_DELTA_PRESS, firstEntry);
+        SendSensorValue(I_POST_MEM_PRESS, firstEntry);
 
         SendSensorValueStatus(I_PERM_FLOW, firstEntry);
         SendSensorValueStatus(I_RECYCLE_FLOW, firstEntry);
@@ -695,8 +698,9 @@ void Nextion::PrintPage(bool firstEntry) // set firstEntry to true for setup of 
         SendIconStatus(I_RO_PUMP, firstEntry);
         SendIconStatus(I_BOOSTER_PUMP, firstEntry);
 
-        SendSensorValue(I_FEED_PRESS, firstEntry);
-        SendSensorValue(I_HP_PRESS, firstEntry);
+        SendSensorValue(I_FEED_PUMP_PRESS, firstEntry);
+        SendSensorValue(I_HP_INLET_PRESS, firstEntry);
+        SendSensorValue(I_HP_OUTLET_PRESS, firstEntry);
         SendSensorValue(I_DELTA_PRESS, firstEntry);
         SendSensorValue(I_POST_MEM_PRESS, firstEntry);
         SendSensorValue(I_BOOSTER_PRESS, firstEntry);
@@ -736,10 +740,11 @@ void Nextion::PrintPage(bool firstEntry) // set firstEntry to true for setup of 
         SendIconStatus(I_RO_PUMP, firstEntry);
         SendIconStatus(I_FEED_PUMP, firstEntry);
 
-        SendSensorValueStatus(I_FEED_PRESS, firstEntry);
-        SendSensorValueStatus(I_HP_PRESS, firstEntry);
-        SendSensorValueStatus(I_POST_MEM_PRESS, firstEntry);
-        SendSensorValueStatus(I_DELTA_PRESS, firstEntry);
+        SendSensorValue(I_FEED_PUMP_PRESS, firstEntry);
+        SendSensorValue(I_HP_INLET_PRESS, firstEntry);
+        SendSensorValue(I_HP_OUTLET_PRESS, firstEntry);
+        SendSensorValue(I_DELTA_PRESS, firstEntry);
+        SendSensorValue(I_POST_MEM_PRESS, firstEntry);
 
         SendSensorValueStatus(I_PERM_FLOW, firstEntry);
         SendSensorValueStatus(I_RECYCLE_FLOW, firstEntry);

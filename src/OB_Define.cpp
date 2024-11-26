@@ -44,7 +44,7 @@ bool AnalogSetup(ADS1115 &AnalogDC)
     {
         if (AnalogDC.begin())
         {
-            AnalogDC.setGain(0);     //  +/-4 volt -  2mV unit
+            AnalogDC.setGain(0);     //  +/-6.144 volt - 3mV / unit
             AnalogDC.setDataRate(7); //  [0-7] = {8, 16, 32, 64, 128, 250, 475, 860} SPS
             AnalogDC.setMode(1);     //  continuous mode = 0 , single = 1
             return true;
@@ -184,21 +184,6 @@ void PulseMeter::CalculateFlowNew(bool calcVolume)
             float freq = 1000.0F * PULSE_SAMPLES / localTimeMs;
             float temp = freq * 60.0F / *_FLOW_FACTOR; // conver to lph from lpm and divide by the manufacturer flow factor
             FlowRate = (FlowRate * (_div - 1) + (temp)) / _div;
-            // if (_inputPin == D_IN_4)
-            //     debug("Product");
-            // else if (_inputPin == D_IN_5)
-            //     debug("Waste");
-            // else
-            //     debug("X-flow");
-            // debug(" - time: ");
-            // debug((uint)localTimeMs);
-            // debug("ms\tfreq: ");
-            // debug(freq);
-            // debug("Hz\tFF: ");
-            // debug(*_FLOW_FACTOR);
-            // debug("\tFlowRate: ");
-            // debugln(temp);
-            // debugln();
             if (calcVolume)
             {
                 volumePulses += PULSE_SAMPLES;

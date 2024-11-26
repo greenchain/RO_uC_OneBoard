@@ -18,20 +18,21 @@ void SendToBlynk(void)
     }
 
     // Sensors
-    if (xSemaphoreTake(xSemaphore, (10 * portTICK_PERIOD_MS))) // TODO need to give semaphore
+    if (xSemaphoreTake(xSemaphore, (10 * portTICK_PERIOD_MS))) // TODO need to give semaphore?
     {
         // Update connected status
         I_WIFI.ChangeStatus((Status_t)Blynk.connected());
 
         // SEND SENSOR DATA TO BLYNK
         Blynk.virtualWrite(B_EC, SM.EC);
-        Blynk.virtualWrite(B_FEED_PRESS, SM.FeedPressure);
+        Blynk.virtualWrite(B_HP_IN_PRESS, SM.HPP_InletPressure);
 
-        Blynk.virtualWrite(B_HP_PRESS, SM.HP_Pressure);
+        Blynk.virtualWrite(B_HP_OUT_PRESS, SM.HP_PumpPressure);
         Blynk.virtualWrite(B_POST_MEM_PRESS, SM.PostMemPressure);
         Blynk.virtualWrite(B_DELTA_PRESS, SM.DeltaMemPressure);
-        Blynk.virtualWrite(B_BOOST_PRESS, SM.BoostPressure);
-
+        Blynk.virtualWrite(B_BOOST_PRESS, SM.BoostPumpPressure);
+        Blynk.virtualWrite(B_FEED_PUMP_PRESS, SM.FeedPumpPressure);
+        
         Blynk.virtualWrite(B_PRODUCT_VOLUME, PermeateVM.Volume_m3);
         Blynk.virtualWrite(B_TEMP, AmbientTemp.currTemp);
 
@@ -56,17 +57,23 @@ void SendToBlynk(void)
 }
 void CheckPumpStates(void)
 {
-    static ModbusVSD::PumpState_t FeedPumpState = ModbusVSD::PumpConnect;
-    if (FeedPumpState != HPP_VSD.PumpState)
+    static ModbusVSD::PumpState_t HP_PumpState = ModbusVSD::PumpConnect;
+    if (HP_PumpState != HPP_VSD.PumpState)
     {
-        FeedPumpState = HPP_VSD.PumpState;
-        SendPumpState(FeedPumpState, B_HP_PUMP);
+        HP_PumpState = HPP_VSD.PumpState;
+        SendPumpState(HP_PumpState, B_HP_PUMP);
     }
-    static ModbusVSD::PumpState_t BW_PumpState = ModbusVSD::PumpConnect;
-    if (BW_PumpState != BOOST_VSD.PumpState)
+    static ModbusVSD::PumpState_t Boost_PumpState = ModbusVSD::PumpConnect;
+    if (Boost_PumpState != BOOST_VSD.PumpState)
     {
-        BW_PumpState = BOOST_VSD.PumpState;
-        SendPumpState(BW_PumpState, B_BOOST_PUMP);
+        Boost_PumpState = BOOST_VSD.PumpState;
+        SendPumpState(Boost_PumpState, B_BOOST_PUMP);
+    }
+    static ModbusVSD::PumpState_t FP_PumpState = ModbusVSD::PumpConnect;
+    if (FP_PumpState != FP_VSD.PumpState)
+    {
+        FP_PumpState = FP_VSD.PumpState;
+        SendPumpState(FP_PumpState, B_BOOST_PUMP);
     }
 }
 void UpdateBlynkWithInputs(void)
@@ -98,7 +105,7 @@ void CheckForStateChange(bool &changed)
             sprintf(tempStr, "External Fault Input");
             break;
         case ST_OVER_P_FAULT:
-            sprintf(tempStr, "Over Max Pressure: %0.2f bar , %0.2f bar", SM.HP_Pressure, SM.PostMemPressure);
+            sprintf(tempStr, "Over Max Pressure: %0.2f bar , %0.2f bar", SM.HP_PumpPressure, SM.PostMemPressure);
             break;
         case ST_D_P_FAULT:
             sprintf(tempStr, "High Delta Membrane Pressure: %0.2f bar", SM.DeltaMemPressure);
@@ -112,8 +119,8 @@ void CheckForStateChange(bool &changed)
         case ST_EC_FAULT:
             sprintf(tempStr, "EC Fault: %0.2f bar", SM.EC);
             break;
-        case ST_FEED_P_FAULT:
-            sprintf(tempStr, "Low Feed Pressure: %0.2f bar", SM.FeedPressure);
+        case ST_HPP_INLET_P_FAULT:
+            sprintf(tempStr, "Low Feed Pressure: %0.2f bar", SM.HPP_InletPressure);
             break;
 
         default:
