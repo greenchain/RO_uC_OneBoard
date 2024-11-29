@@ -35,6 +35,7 @@ Sensor I_EC_PERM(I_SENSOR, '3', SensorBkgndPics, NO_DECIMAL, INT_MIN, DEF_EC_MAX
 Sensor I_RECOVERY(I_OTHER, '5', SensorBkgndPics, ONE_DECIMAL, DEF_REC_MIN, DEF_REC_MAX);
 
 // Gauges
+PumpValues PVAL_FEED_PUMP(12, 13, 14, 15, 16);
 PumpValues PVAL_RO_PUMP(0, 1, 2, 3, 4);
 PumpValues PVAL_BOOSTER_PUMP(7, 8, 9, 10, 11);
 
@@ -43,8 +44,11 @@ Value VAL_PERM_VOL('x', 6, ONE_DECIMAL);
 
 Value VAL_CalibVoltage('c', 0, NO_DECIMAL);
 Value VAL_CalibCurrent('c', 1, NO_DECIMAL);
-Value VAL_CalibSmallPM('c', 2, ONE_DECIMAL);
-Value VAL_CalibLargePM('c', 3, TWO_DECIMAL);
+// Value VAL_CalibSmallPM('c', 2, ONE_DECIMAL);
+// Value VAL_CalibLargePM('c', 3, TWO_DECIMAL);
+Value VAL_CalibPermPM('c', 2, TWO_DECIMAL);
+Value VAL_CalibBrinePM('c', 3, TWO_DECIMAL);
+Value VAL_CalibRecyclePM('c', 4, TWO_DECIMAL);
 
 Value VAL_A0_Current('A', 0, ONE_DECIMAL);
 Value VAL_A1_Current('A', 1, ONE_DECIMAL);
@@ -668,6 +672,7 @@ void Nextion::PrintPage(bool firstEntry) // set firstEntry to true for setup of 
         SendIconStatus(I_INLET_VALVE, firstEntry);
         SendIconStatus(I_FLUSH_VALVE, firstEntry);
 
+        SendIconStatus(I_FEED_PUMP, firstEntry);
         SendIconStatus(I_RO_PUMP, firstEntry);
 
         SendSensorValue(I_FEED_PUMP_PRESS, firstEntry);
@@ -695,6 +700,7 @@ void Nextion::PrintPage(bool firstEntry) // set firstEntry to true for setup of 
         }
         SendIconStatus(I_WIFI, firstEntry);
 
+        SendIconStatus(I_FEED_PUMP, firstEntry);
         SendIconStatus(I_RO_PUMP, firstEntry);
         SendIconStatus(I_BOOSTER_PUMP, firstEntry);
 
@@ -714,6 +720,7 @@ void Nextion::PrintPage(bool firstEntry) // set firstEntry to true for setup of 
         SendStatus(VAL_RECOVERY, firstEntry);
         SendValue(VAL_PERM_VOL, firstEntry);
 
+        SendPumpValues(PVAL_FEED_PUMP, firstEntry);
         SendPumpValues(PVAL_RO_PUMP, firstEntry);
         SendPumpValues(PVAL_BOOSTER_PUMP, firstEntry);
         break;
@@ -758,8 +765,9 @@ void Nextion::PrintPage(bool firstEntry) // set firstEntry to true for setup of 
     case P_CALIBRATE:
         SendValue(VAL_CalibVoltage, firstEntry);
         SendValue(VAL_CalibCurrent, firstEntry);
-        SendValue(VAL_CalibSmallPM, firstEntry);
-        SendValue(VAL_CalibLargePM, firstEntry);
+        SendValue(VAL_CalibPermPM, firstEntry);
+        SendValue(VAL_CalibBrinePM, firstEntry);
+        SendValue(VAL_CalibRecyclePM, firstEntry);
 
         SendValue(VAL_A0_Voltage, firstEntry);
         SendValue(VAL_A1_Voltage, firstEntry);

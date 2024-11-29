@@ -18,6 +18,7 @@ private:
 #define N_MAX_EMHEATER 12       // 12 is the maximum allowable registers to be read in one transmission.
     const uint _numValues = 12; // number of values to read
 
+    bool requestSent = false; 
     
     uint _localIndex; // index on the list of VSDs
     uint16_t _data[N_MAX_EMHEATER] = {};

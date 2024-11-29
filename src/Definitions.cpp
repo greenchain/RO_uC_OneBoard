@@ -16,11 +16,11 @@ uint VoltageFactor = DEF_VOLTAGE_FACTOR;
 
 VolumeMeter PermeateVM(VOLUME_IN);
 
-float LargeFlowFactor = DEF_LARGE_FLOW_FACTOR;
-float SmallFlowFactor = DEF_SMALL_FLOW_FACTOR;
-PulseMeter PermeatePM(FLOW_PERM, &LargeFlowFactor);
-PulseMeter BrinePM(FLOW_BRINE, &LargeFlowFactor);     // 12.5
-PulseMeter RecyclePM(FLOW_RECYCLE, &LargeFlowFactor); // 120
+// float LargeFlowFactor = DEF_LARGE_FLOW_FACTOR;
+// float SmallFlowFactor = DEF_SMALL_FLOW_FACTOR;
+PulseMeter_v2 PermeatePM(FLOW_PERM, DEF_PRODUCT_FF);
+PulseMeter_v2 BrinePM(FLOW_BRINE, DEF_WASTE_FF);     // 12.5
+PulseMeter_v2 RecyclePM(FLOW_RECYCLE, DEF_RECYCLE_FF); // 120
 
 DigitalInput FeedTankFloat(FEED_AVAILABLE);
 DigitalInput ProductTankFloat(PRODUCT_FLOAT);
@@ -30,7 +30,7 @@ DigitalInput FaultRelay(FAULT_IN);
 TempSensor AmbientTemp;
 
 ModbusVSD FP_VSD(1, cbFeedReadHreg);
-ModbusVSD HPP_VSD(2, cbHPP_ReadHreg); //ModbusVSD HPP_VSD(1, cbHPP_ReadHreg);
+ModbusVSD HPP_VSD(2, cbHPP_ReadHreg);      // ModbusVSD HPP_VSD(1, cbHPP_ReadHreg);
 ModbusVSD BOOST_VSD(3, cbBoosterReadHreg); // ModbusVSD BOOST_VSD(2, cbBoosterReadHreg);
 
 Warnings PermFlowWarning("Product Flow", MIN_IN_SEC);
@@ -300,16 +300,16 @@ void CheckInputs(void)
 }
 void CheckPulseMeters(void)
 {
-    PermeatePM.CalculateFlowNew();
+    PermeatePM.CalculateFlow();
     HMI.ConvertToHMI_SensorValue(PermeatePM.FlowRate, I_PERM_FLOW, SM.state == ST_SERVICE);
     // Blynk.virtualWrite(B_PERM_FLOW, PermeatePM.FlowRate);
 
-    BrinePM.CalculateFlowNew();
+    BrinePM.CalculateFlow();
     // debugln("Brine: " + String(BrinePM.FlowRate, 2));
     HMI.ConvertToHMI_SensorValue(BrinePM.FlowRate, I_BRINE_FLOW, SM.state == ST_SERVICE);
     // Blynk.virtualWrite(B_BRINE_FLOW, BrinePM.FlowRate);
 
-    RecyclePM.CalculateFlowNew();
+    RecyclePM.CalculateFlow();
     HMI.ConvertToHMI_SensorValue(RecyclePM.FlowRate, I_RECYCLE_FLOW, SM.state == ST_SERVICE);
     // Blynk.virtualWrite(B_RECYCLE_FLOW, RecyclePM.FlowRate);
 }
@@ -693,23 +693,33 @@ void ManualStateSwitch(uint state)
 }
 void CalibrationHandler(char type, bool up_down)
 {
+    float tempFactor = 0;
     switch (type)
     {
     case 's': // save
         SET.StoreVoltageFactor(VoltageFactor);
         SET.StoreCurrentFactor(CurrentFactor);
-        SET.StoreSmallPM_Factor(VAL_CalibSmallPM.val);
-        SET.StoreLargePM_Factor(VAL_CalibLargePM.val);
+        // SET.StoreSmallPM_Factor(VAL_CalibSmallPM.val);
+        // SET.StoreLargePM_Factor(VAL_CalibLargePM.val);
+        SET.StorePermPM_Factor(VAL_CalibPermPM.val);
+        SET.StoreBrinePM_Factor(VAL_CalibBrinePM.val);
+        SET.StoreRecyclePM_Factor(VAL_CalibRecyclePM.val);
         break;
     case 'd': // reset to default
         VAL_CalibVoltage.val = DEF_VOLTAGE_FACTOR;
         VoltageFactor = DEF_VOLTAGE_FACTOR;
         VAL_CalibCurrent.val = DEF_CURRENT_FACTOR;
         CurrentFactor = DEF_CURRENT_FACTOR;
-        SmallFlowFactor = DEF_SMALL_FLOW_FACTOR;
-        VAL_CalibSmallPM.val = SmallFlowFactor * VAL_CalibSmallPM.mult;
-        LargeFlowFactor = DEF_LARGE_FLOW_FACTOR;
-        VAL_CalibLargePM.val = LargeFlowFactor * VAL_CalibLargePM.mult;
+        // SmallFlowFactor = DEF_SMALL_FLOW_FACTOR;
+        // VAL_CalibSmallPM.val = SmallFlowFactor * VAL_CalibSmallPM.mult;
+        // LargeFlowFactor = DEF_LARGE_FLOW_FACTOR;
+        // VAL_CalibLargePM.val = LargeFlowFactor * VAL_CalibLargePM.mult;
+        PermeatePM.FLOW_FACTOR = DEF_PRODUCT_FF;
+        VAL_CalibPermPM.val = DEF_PRODUCT_FF * VAL_CalibPermPM.mult;
+        BrinePM.FLOW_FACTOR = DEF_WASTE_FF;
+        VAL_CalibBrinePM.val = DEF_WASTE_FF * VAL_CalibBrinePM.mult;
+        RecyclePM.FLOW_FACTOR = DEF_RECYCLE_FF;
+        VAL_CalibRecyclePM.val = DEF_RECYCLE_FF * VAL_CalibRecyclePM.mult;
         break;
     case 'r': // restore saved
         SET.getCalibrationSettings();
@@ -726,29 +736,29 @@ void CalibrationHandler(char type, bool up_down)
         else
             VAL_CalibCurrent.val = --CurrentFactor;
         break;
-    case '2': // c2 - Small PM
+    case '2': // c2 - Product PM
         if (up_down)
-        {
-            SmallFlowFactor = VAL_CalibSmallPM.val++;
-            SmallFlowFactor /= VAL_CalibSmallPM.mult;
-        }
+            tempFactor = VAL_CalibPermPM.val++;
         else
-        {
-            SmallFlowFactor = VAL_CalibSmallPM.val--;
-            SmallFlowFactor /= VAL_CalibSmallPM.mult;
-        }
+            tempFactor = VAL_CalibPermPM.val--;
+
+        PermeatePM.FLOW_FACTOR = tempFactor / VAL_CalibPermPM.mult;
         break;
-    case '3': // c3 - Large PM
+    case '3': // c3 - Waste PM
         if (up_down)
-        {
-            LargeFlowFactor = VAL_CalibLargePM.val++;
-            LargeFlowFactor /= VAL_CalibLargePM.mult;
-        }
+            tempFactor = VAL_CalibBrinePM.val++;
         else
-        {
-            LargeFlowFactor = VAL_CalibLargePM.val--;
-            LargeFlowFactor /= VAL_CalibLargePM.mult;
-        }
+            tempFactor = VAL_CalibBrinePM.val--;
+
+        BrinePM.FLOW_FACTOR = tempFactor / VAL_CalibBrinePM.mult;
+        break;
+    case '4': // c4 - Recycle PM
+        if (up_down)
+            tempFactor = VAL_CalibRecyclePM.val++;
+        else
+            tempFactor = VAL_CalibRecyclePM.val--;
+
+        RecyclePM.FLOW_FACTOR = tempFactor / VAL_CalibRecyclePM.mult;
         break;
     default:
         break;
@@ -792,8 +802,11 @@ void Save::initialise(void)
 
     StoreVoltageFactor(VoltageFactor);
     StoreCurrentFactor(CurrentFactor);
-    StoreSmallPM_Factor(DEF_SMALL_FLOW_FACTOR * VAL_CalibSmallPM.mult);
-    StoreLargePM_Factor(DEF_LARGE_FLOW_FACTOR * VAL_CalibLargePM.mult);
+    StorePermPM_Factor(DEF_PRODUCT_FF * VAL_CalibPermPM.mult);
+    StoreBrinePM_Factor(DEF_WASTE_FF * VAL_CalibBrinePM.mult);
+    StoreRecyclePM_Factor(DEF_RECYCLE_FF * VAL_CalibRecyclePM.mult);
+    // StoreSmallPM_Factor(DEF_SMALL_FLOW_FACTOR * VAL_CalibSmallPM.mult);
+    // StoreLargePM_Factor(DEF_LARGE_FLOW_FACTOR * VAL_CalibLargePM.mult);
 }
 void Save::getAllSettings(void) // get all saved settings
 {
@@ -839,10 +852,12 @@ void Save::getCalibrationSettings(void)
     VAL_CalibVoltage.val = VoltageFactor;
     CurrentFactor = getUshortIfExist(cftr_k, DEF_CURRENT_FACTOR);
     VAL_CalibCurrent.val = CurrentFactor;
-    SmallFlowFactor = (float)getUshortIfExist(PMsm_k, DEF_SMALL_FLOW_FACTOR * VAL_CalibSmallPM.val) / VAL_CalibSmallPM.mult;
-    HMI.ConvertToHMI_Value(SmallFlowFactor, VAL_CalibSmallPM, false);
-    LargeFlowFactor = (float)getUshortIfExist(PMlg_k, DEF_LARGE_FLOW_FACTOR * VAL_CalibLargePM.val) / VAL_CalibLargePM.mult;
-    HMI.ConvertToHMI_Value(LargeFlowFactor, VAL_CalibLargePM, false);
+    PermeatePM.FLOW_FACTOR = (float)getUshortIfExist(PMpr_k, DEF_PRODUCT_FF * VAL_CalibPermPM.mult) / VAL_CalibPermPM.mult;
+    HMI.ConvertToHMI_Value(PermeatePM.FLOW_FACTOR, VAL_CalibPermPM, false);
+    BrinePM.FLOW_FACTOR = (float)getUshortIfExist(PMbr_k, DEF_WASTE_FF * VAL_CalibBrinePM.val) / VAL_CalibBrinePM.mult;
+    HMI.ConvertToHMI_Value(BrinePM.FLOW_FACTOR, VAL_CalibBrinePM, false);
+    RecyclePM.FLOW_FACTOR = (float)getUshortIfExist(PMre_k, DEF_RECYCLE_FF * VAL_CalibRecyclePM.val) / VAL_CalibRecyclePM.mult;
+    HMI.ConvertToHMI_Value(RecyclePM.FLOW_FACTOR, VAL_CalibRecyclePM, false);
 }
 bool Save::getBoolIfExist(const char *key, bool defVal)
 {
@@ -935,6 +950,8 @@ void StateMachineRO::RunStateMachine(void)
     case ST_TANK_FULL:
         if (!productFloat_flag || !runButton)
             ChangeState(ST_STOPPED);
+        else if (backwashing_flag)
+            ChangeState(ST_PREFILTER);
         break;
     case ST_PREFILTER:
         if (!backwashing_flag || !runButton)
@@ -1112,16 +1129,16 @@ void StateMachineRO::ChangeState(state_t nextState)
         switch (state)
         {
         case ST_STOPPED:
-            WriteOutput(WARNING_LIGHT, false);
+            WriteOutput(WARNING_LIGHT, LOW);
             break;
         case ST_TANK_FULL:
             break;
         case ST_PREFILTER:
-            WriteOutput(FEED_START_STOP, true);
+            WriteOutput(FEED_START_STOP, HIGH);
             break;
         case ST_VSD_FAULT:
             HMI.AddFault(VSD_Fault);
-            WriteOutput(WARNING_LIGHT, true);
+            WriteOutput(WARNING_LIGHT, HIGH);
             break;
         case ST_FEED_EMPTY:
             if (inline_mode)

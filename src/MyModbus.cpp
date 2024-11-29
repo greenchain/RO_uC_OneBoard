@@ -10,7 +10,7 @@ ModbusVSD::ModbusVSD(uint slaveID, cbTransaction callBack) : _cbFunction(callBac
 void ModbusVSD::ModbusSetup(HardwareSerial *MBSTREAM)
 {
     MBSTREAM->begin(9600, SERIAL_8N2, MB_RX_PIN, MB_TX_PIN);
-    mb.begin(MBSTREAM);
+    mb.begin(MBSTREAM,MB_REDE_PIN);
     mb.master();
 }
 
@@ -18,7 +18,6 @@ void ModbusVSD::RunModbus(void)
 {
     if (currentVSD_Index == _localIndex)
     {
-        static bool requestSent = false;
         switch (MBstate)
         {
         case MB_Idle:

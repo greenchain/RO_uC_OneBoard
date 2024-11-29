@@ -28,8 +28,14 @@
 
 #define VSD_V_FACTOR 100
 
-#define DEF_SMALL_FLOW_FACTOR 5.76F // 60 / 4.8
-#define DEF_LARGE_FLOW_FACTOR 0.55F // 60 / 0.5
+#define DEF_SMALL_FLOW_FACTOR 4.8F    // 60 / 4.8
+#define DEF_SS_1andQrt_FLOW_FACTOR 0.72
+#define DEF_LARGE_FLOW_FACTOR 0.5F    // 60 / 0.5
+#define DEF_X_LARGE_FLOW_FACTOR 0.25F // 60 / 0.25
+
+#define DEF_PRODUCT_FF DEF_SS_1andQrt_FLOW_FACTOR
+#define DEF_WASTE_FF DEF_SS_1andQrt_FLOW_FACTOR
+#define DEF_RECYCLE_FF DEF_SS_1andQrt_FLOW_FACTOR
 
 // PINS
 // Relay Outputs
@@ -113,9 +119,10 @@ extern Nextion HMI;
 extern ADS1115 ADC_1;
 // extern VolumeMeter FeedVM;
 extern VolumeMeter PermeateVM;
-extern PulseMeter PermeatePM;
-extern PulseMeter BrinePM;
-extern PulseMeter RecyclePM;
+
+extern PulseMeter_v2 PermeatePM;
+extern PulseMeter_v2 BrinePM;
+extern PulseMeter_v2 RecyclePM;
 
 extern DigitalInput FeedTankFloat;
 extern DigitalInput ProductTankFloat;
@@ -165,8 +172,11 @@ extern Value VAL_PERM_VOL;
 
 extern Value VAL_CalibVoltage;
 extern Value VAL_CalibCurrent;
-extern Value VAL_CalibSmallPM;
-extern Value VAL_CalibLargePM;
+// extern Value VAL_CalibSmallPM;
+// extern Value VAL_CalibLargePM;
+extern Value VAL_CalibPermPM;
+extern Value VAL_CalibBrinePM;
+extern Value VAL_CalibRecyclePM;
 
 extern Value VAL_A0_Current;
 extern Value VAL_A1_Current;
@@ -254,8 +264,9 @@ private:
 
     const char cftr_k[4] = "cft"; // current conversion factor
     const char vftr_k[4] = "vft"; // voltage conversion factor
-    const char PMsm_k[4] = "PMs"; // small pulse meter factor
-    const char PMlg_k[4] = "PMl"; // large pulse meter factor
+    const char PMpr_k[4] = "PMp"; // permeate pulse meter factor
+    const char PMbr_k[4] = "PMb"; // brine/concentrate pulse meter factor
+    const char PMre_k[4] = "PMr"; // recycle pulse meter factor
 
     Preferences settings; // File system Instance that saves settings based on a key
 
@@ -276,7 +287,7 @@ public:
     uint LastSavedRO_PumpMins = 0;
     uint LastSavedBoostPumpMins = 0;
     uint LastSavedPermVol = 0;
-    uint LastSavedFeedPumpMins =0;
+    uint LastSavedFeedPumpMins = 0;
 
     //  Functions for saving/retrieving saved variables
     void FileSetup(void);
@@ -341,8 +352,11 @@ public:
 
     void StoreVoltageFactor(uint16_t factor) { settings.putUShort(vftr_k, factor); }
     void StoreCurrentFactor(uint16_t factor) { settings.putUShort(cftr_k, factor); }
-    void StoreSmallPM_Factor(uint16_t factor) { settings.putUShort(PMsm_k, factor); }
-    void StoreLargePM_Factor(uint16_t factor) { settings.putUShort(PMlg_k, factor); }
+    // void StoreSmallPM_Factor(uint16_t factor) { settings.putUShort(PMsm_k, factor); }
+    // void StoreLargePM_Factor(uint16_t factor) { settings.putUShort(PMlg_k, factor); }
+    void StorePermPM_Factor(uint16_t factor) { settings.putUShort(PMpr_k, factor); }
+    void StoreBrinePM_Factor(uint16_t factor) { settings.putUShort(PMbr_k, factor); }
+    void StoreRecyclePM_Factor(uint16_t factor) { settings.putUShort(PMre_k, factor); }
     size_t freeEntries(void) { return settings.freeEntries(); }
 };
 
@@ -351,7 +365,7 @@ class StateMachineRO
 private:
 public:
     // variables
-    bool inline_mode = true;
+    bool inline_mode = false;
 
     bool runButton = false;
     bool backwashing_flag = false;
@@ -379,7 +393,7 @@ public:
     // float PH = SENSOR_MIN_PH;
     // float ORP = SENSOR_MIN_ORP;
     float EC = SENSOR_MIN_0;
-    float HPP_InletPressure = SENSOR_MIN_0;    
+    float HPP_InletPressure = SENSOR_MIN_0;
     float PostMemPressure = SENSOR_MIN_0;
 
     /* CALCULATED */

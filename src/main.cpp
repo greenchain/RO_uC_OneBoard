@@ -85,7 +85,10 @@ void loop()
 //********************** FUNTIONS **********************
 void InterruptSetup(void)
 {
-  attachInterrupt(digitalPinToInterrupt(FLOW_PERM), permeatePulse, RISING);
-  attachInterrupt(digitalPinToInterrupt(FLOW_BRINE), brinePulse, RISING);
-  attachInterrupt(digitalPinToInterrupt(FLOW_RECYCLE), recyclePulse, RISING);
+  // attachInterrupt(digitalPinToInterrupt(FLOW_PERM), permeatePulse, RISING);
+  // attachInterrupt(digitalPinToInterrupt(FLOW_BRINE), brinePulse, RISING);
+  // attachInterrupt(digitalPinToInterrupt(FLOW_RECYCLE), recyclePulse, RISING);
+  PermeatePM.begin();
+  BrinePM.begin();
+  RecyclePM.begin();
 }
